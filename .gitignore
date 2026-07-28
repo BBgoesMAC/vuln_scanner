@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Echte API-Keys niemals committen (nur config.example.json ist erlaubt)
+config.json
+
+# Scan-Ergebnisse / Exporte
+*.json
+!config.example.json
+passive-recon-*.json
+
+# OS
+.DS_Store

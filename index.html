@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>passive-recon</title>
+<style>
+  :root{
+    --bg:#0b0f17; --bg2:#0f1520; --panel:#141b28; --panel2:#1a2331;
+    --border:#243044; --border2:#2f3d55;
+    --txt:#e6ecf5; --muted:#8b98ad; --dim:#5f6d84;
+    --accent:#5b8cff; --accent2:#6ee7d6;
+    --crit:#ff5c6c; --high:#ff9142; --med:#ffd24a; --low:#4dd4c4; --info:#7f8ca3;
+    --shadow:0 10px 40px rgba(0,0,0,.45);
+    --mono:'SFMono-Regular',ui-monospace,'JetBrains Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 80% -10%,#182338 0%,transparent 60%),var(--bg);
+    color:var(--txt); line-height:1.5; min-height:100vh;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 20px 80px}
+
+  header{
+    display:flex;align-items:center;gap:14px;padding:26px 0 18px;
+  }
+  .logo{
+    width:44px;height:44px;border-radius:12px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--accent),#7c5bff);
+    display:grid;place-items:center;box-shadow:var(--shadow);
+  }
+  .logo svg{width:24px;height:24px;fill:#fff}
+  header h1{margin:0;font-size:22px;letter-spacing:.3px}
+  header p{margin:2px 0 0;color:var(--muted);font-size:13px}
+  .badge-pill{margin-left:auto;font-size:11px;color:var(--muted);
+    border:1px solid var(--border);border-radius:999px;padding:5px 12px}
+
+  .card{
+    background:linear-gradient(180deg,var(--panel),var(--bg2));
+    border:1px solid var(--border);border-radius:16px;padding:20px;
+    box-shadow:var(--shadow);margin-bottom:18px;
+  }
+  .legal{
+    display:flex;gap:12px;align-items:flex-start;
+    background:linear-gradient(180deg,#241d10,#1a1509);
+    border:1px solid #4a3a12;border-radius:12px;padding:14px 16px;margin-bottom:18px;
+    font-size:13px;color:#e7d6a8;
+  }
+  .legal svg{width:18px;height:18px;fill:#f0c65a;flex:0 0 auto;margin-top:2px}
+  .legal label{display:flex;gap:8px;align-items:center;margin-top:8px;color:#f5e6bd;cursor:pointer}
+
+  label.fld{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--muted);margin:0 0 7px}
+  textarea,input[type=text],input[type=number],input[type=password]{
+    width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;
+    color:var(--txt);padding:11px 13px;font-size:14px;font-family:var(--mono);
+    outline:none;transition:border-color .15s,box-shadow .15s;
+  }
+  textarea:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.15)}
+  textarea{min-height:96px;resize:vertical}
+
+  .row{display:flex;gap:16px;flex-wrap:wrap;margin-top:16px}
+  .row>div{flex:1 1 200px}
+
+  .toggles{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .toggle{
+    display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);
+    border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;user-select:none;
+    transition:.15s;
+  }
+  .toggle:hover{border-color:var(--border2)}
+  .toggle input{accent-color:var(--accent);width:15px;height:15px}
+  .toggle.on{border-color:var(--accent);background:rgba(91,140,255,.08)}
+
+  details.adv{margin-top:16px;border-top:1px solid var(--border);padding-top:8px}
+  details.adv summary{cursor:pointer;color:var(--accent2);font-size:13px;
+    list-style:none;padding:8px 0;user-select:none}
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary::before{content:'▸ ';color:var(--dim)}
+  details.adv[open] summary::before{content:'▾ '}
+
+  .actions{display:flex;gap:12px;align-items:center;margin-top:20px}
+  button.primary{
+    background:linear-gradient(135deg,var(--accent),#7c5bff);color:#fff;border:0;
+    border-radius:10px;padding:12px 26px;font-size:15px;font-weight:600;cursor:pointer;
+    box-shadow:0 6px 20px rgba(91,140,255,.35);transition:.15s;
+  }
+  button.primary:hover:not(:disabled){transform:translateY(-1px)}
+  button.primary:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  button.ghost{background:transparent;border:1px solid var(--border);color:var(--txt);
+    border-radius:10px;padding:11px 18px;font-size:14px;cursor:pointer}
+  button.ghost:hover{border-color:var(--border2)}
+  button.ghost:disabled{opacity:.4;cursor:not-allowed}
+
+  .status{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px;
+    min-height:22px;margin:2px 0 6px}
+  .spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Summary bar */
+  .sumbar{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 20px}
+  .chip{display:flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:10px;
+    padding:8px 13px;font-size:13px;cursor:pointer;background:var(--panel);user-select:none;transition:.15s}
+  .chip:hover{border-color:var(--border2)}
+  .chip.off{opacity:.35}
+  .chip .dot{width:9px;height:9px;border-radius:50%}
+  .chip b{font-variant-numeric:tabular-nums}
+  .dot.critical{background:var(--crit)} .dot.high{background:var(--high)}
+  .dot.medium{background:var(--med)} .dot.low{background:var(--low)} .dot.info{background:var(--info)}
+
+  /* Target result cards */
+  .target{border:1px solid var(--border);border-radius:16px;margin-bottom:16px;overflow:hidden;
+    background:var(--panel)}
+  .thead{display:flex;align-items:center;gap:12px;padding:15px 18px;background:var(--panel2);
+    border-bottom:1px solid var(--border)}
+  .thead .tname{font-weight:600;font-size:16px;word-break:break-all}
+  .thead .tmeta{color:var(--muted);font-size:12px;font-family:var(--mono);margin-left:auto;text-align:right}
+  .tbody{padding:8px 10px}
+  .finding{display:grid;grid-template-columns:92px 1fr;gap:12px;padding:12px 10px;
+    border-bottom:1px solid rgba(255,255,255,.04)}
+  .finding:last-child{border-bottom:0}
+  .sev{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+    height:fit-content;padding:4px 0;text-align:center;border-radius:6px}
+  .sev.critical{background:rgba(255,92,108,.15);color:var(--crit);border:1px solid rgba(255,92,108,.35)}
+  .sev.high{background:rgba(255,145,66,.14);color:var(--high);border:1px solid rgba(255,145,66,.35)}
+  .sev.medium{background:rgba(255,210,74,.13);color:var(--med);border:1px solid rgba(255,210,74,.32)}
+  .sev.low{background:rgba(77,212,196,.12);color:var(--low);border:1px solid rgba(77,212,196,.3)}
+  .sev.info{background:rgba(127,140,163,.12);color:var(--info);border:1px solid rgba(127,140,163,.28)}
+  .ftitle{font-weight:600;font-size:14.5px}
+  .fcat{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
+    border:1px solid var(--border);border-radius:5px;padding:1px 7px;margin-left:8px;vertical-align:middle}
+  .fdetail{color:var(--muted);font-size:13px;margin-top:3px}
+  .fevi{color:var(--accent2);font-size:12.5px;font-family:var(--mono);margin-top:4px;word-break:break-all}
+  .fevi a{color:var(--accent2)}
+  .empty{color:var(--dim);padding:16px 10px;font-size:14px}
+  .err{color:var(--crit);padding:14px 18px;font-size:14px}
+
+  .scanning{display:flex;align-items:center;gap:12px;padding:16px 18px;color:var(--muted)}
+  footer{color:var(--dim);font-size:12px;text-align:center;margin-top:30px}
+  .hint{color:var(--dim);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5 3.8 9.7 9 11 5.2-1.3 9-6 9-11V5l-9-4zm0 2.2 7 3.1V11c0 4-2.9 7.9-7 9-4.1-1.1-7-5-7-9V6.3l7-3.1z"/><path d="M10.6 13.6 8.4 11.4 7 12.8l3.6 3.6L17 10l-1.4-1.4z"/></svg></div>
+    <div>
+      <h1>passive-recon</h1>
+      <p>Nicht-invasive Schwachstellen-Reconnaissance · read-only</p>
+    </div>
+    <span class="badge-pill">lokal · 127.0.0.1</span>
+  </header>
+
+  <div class="legal">
+    <svg viewBox="0 0 24 24"><path d="M12 2 1 21h22L12 2zm0 4 7.5 13h-15L12 6zm-1 5v4h2v-4h-2zm0 5v2h2v-2h-2z"/></svg>
+    <div>
+      <b>Rechtlicher Hinweis:</b> Nur gegen Systeme einsetzen, für die eine schriftliche
+      Testfreigabe (Scope / Auftrag) vorliegt. Auch passive Checks berühren das Ziel.
+      <label><input type="checkbox" id="authorized"> Ich habe eine Testfreigabe für die eingegebenen Ziele.</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="fld" for="targets">Ziele — IPs und/oder Domains (eine pro Zeile)</label>
+    <textarea id="targets" placeholder="example.com&#10;203.0.113.10&#10;https://shop.example.com"></textarea>
+    <div class="hint">Trennung per Zeilenumbruch oder Komma. IP oder Domain, optional mit http(s)://</div>
+
+    <div class="toggles" id="toggles">
+      <label class="toggle on"><input type="checkbox" id="opt_http" checked> HTTP-Checks (WP, robots, Dir-Listing, Basic-Auth)</label>
+      <label class="toggle on"><input type="checkbox" id="opt_ports" checked> Port-Checks (FTP/SQL/DB)</label>
+      <label class="toggle on"><input type="checkbox" id="opt_cve" checked> Banner → CVE (NVD)</label>
+      <label class="toggle"><input type="checkbox" id="opt_passive"> Voll-passiv (nur Shodan, kein Kontakt)</label>
+    </div>
+
+    <details class="adv">
+      <summary>Erweiterte Optionen &amp; API-Keys</summary>
+      <div class="row">
+        <div>
+          <label class="fld">WPScan API-Key</label>
+          <input type="password" id="k_wpscan" placeholder="für WP-Core/Plugin-CVEs (optional)">
+        </div>
+        <div>
+          <label class="fld">NVD API-Key</label>
+          <input type="password" id="k_nvd" placeholder="beschleunigt Banner-CVE (optional)">
+        </div>
+        <div>
+          <label class="fld">Shodan API-Key</label>
+          <input type="password" id="k_shodan" placeholder="für Voll-passiv-Modus">
+        </div>
+      </div>
+      <div class="row">
+        <div><label class="fld">Ports (leer = Standard)</label><input type="text" id="p_ports" placeholder="21,3306,5432,1433,1521,27017,6379"></div>
+        <div><label class="fld">Max. CVEs / Produkt</label><input type="number" id="p_maxcve" value="10" min="1" max="100"></div>
+        <div><label class="fld">WP User-Enum max. IDs</label><input type="number" id="p_userenum" value="3" min="1" max="50"></div>
+        <div><label class="fld">HTTP-Timeout (s)</label><input type="number" id="p_timeout" value="8" min="1" max="60"></div>
+      </div>
+      <div class="hint">Keys werden nicht gespeichert; leere Felder greifen auf ENV / config.json des Servers zurück.</div>
+    </details>
+
+    <div class="actions">
+      <button class="primary" id="run" disabled>Scan starten</button>
+      <button class="ghost" id="export" disabled>Als JSON exportieren</button>
+      <button class="ghost" id="clear" disabled>Leeren</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="sumbar" id="sumbar" style="display:none"></div>
+  <div id="results"></div>
+
+  <footer>passive-recon · Standard-Library · Ergebnisse ausschließlich lokal verarbeitet</footer>
+</div>
+
+<script>
+const SEV = ["critical","high","medium","low","info"];
+const SEV_ORDER = {critical:0,high:1,medium:2,low:3,info:4};
+const $ = id => document.getElementById(id);
+let results = [];        // gesammelte TargetResults
+let hidden = new Set();  // ausgeblendete Severities
+
+// Toggle-Optik
+document.querySelectorAll('.toggle input').forEach(cb=>{
+  const upd=()=>cb.closest('.toggle').classList.toggle('on',cb.checked);
+  cb.addEventListener('change',upd); upd();
+});
+
+function canRun(){
+  return $('authorized').checked && $('targets').value.trim().length>0;
+}
+function refreshRun(){ $('run').disabled = !canRun(); }
+$('authorized').addEventListener('change',refreshRun);
+$('targets').addEventListener('input',refreshRun);
+
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function linkifyEvidence(ev){
+  if(!ev) return '';
+  const m = ev.match(/https?:\/\/[^\s\]]+/);
+  if(m){
+    const url=m[0];
+    return esc(ev).replace(esc(url),`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`);
+  }
+  return esc(ev);
+}
+
+function findingRow(f){
+  return `<div class="finding" data-sev="${f.severity}">
+    <div class="sev ${f.severity}">${f.severity}</div>
+    <div>
+      <div class="ftitle">${esc(f.title)}<span class="fcat">${esc(f.category)}</span></div>
+      ${f.detail?`<div class="fdetail">${esc(f.detail)}</div>`:''}
+      ${f.evidence?`<div class="fevi">${linkifyEvidence(f.evidence)}</div>`:''}
+    </div>
+  </div>`;
+}
+
+function targetCard(r){
+  const findings=(r.findings||[]).slice().sort((a,b)=>
+    (SEV_ORDER[a.severity]??9)-(SEV_ORDER[b.severity]??9));
+  const counts={};
+  findings.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1);
+  const summary=SEV.filter(s=>counts[s]).map(s=>
+    `<span style="color:var(--${s==='critical'?'crit':s==='high'?'high':s==='medium'?'med':s==='low'?'low':'info'})">${counts[s]} ${s}</span>`
+  ).join(' · ');
+  let body;
+  if(r.__error){
+    body=`<div class="err">Fehler: ${esc(r.__error)}</div>`;
+  }else if(!findings.length){
+    body=`<div class="empty">Keine Findings.${(r.errors&&r.errors.length)?' ('+esc(r.errors.join('; '))+')':''}</div>`;
+  }else{
+    body=findings.map(findingRow).join('');
+    if(r.errors&&r.errors.length) body+=`<div class="fdetail" style="padding:8px 10px">${esc(r.errors.join('; '))}</div>`;
+  }
+  const meta=[r.resolved_ip?('IP '+r.resolved_ip):'', r.base_url||''].filter(Boolean).join('<br>');
+  return `<div class="target" data-idx="${r.__idx}">
+    <div class="thead">
+      <span class="tname">${esc(r.target)}</span>
+      <span class="tmeta">${meta||'&mdash;'}<br>${summary||''}</span>
+    </div>
+    <div class="tbody">${body}</div>
+  </div>`;
+}
+
+function scanningCard(idx,target){
+  return `<div class="target" data-idx="${idx}" data-scanning="1">
+    <div class="thead"><span class="tname">${esc(target)}</span>
+      <span class="tmeta">läuft…</span></div>
+    <div class="scanning"><div class="spinner"></div> Scanne ${esc(target)} …</div>
+  </div>`;
+}
+
+function renderSummary(){
+  const counts={};
+  results.forEach(r=>(r.findings||[]).forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1));
+  const bar=$('sumbar');
+  if(!results.length){bar.style.display='none';return;}
+  bar.style.display='flex';
+  bar.innerHTML=SEV.map(s=>{
+    const n=counts[s]||0;
+    return `<div class="chip ${hidden.has(s)?'off':''}" data-sev="${s}">
+      <span class="dot ${s}"></span> <span>${s}</span> <b>${n}</b></div>`;
+  }).join('');
+  bar.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
+    const s=c.dataset.sev;
+    hidden.has(s)?hidden.delete(s):hidden.add(s);
+    applyFilter(); renderSummary();
+  });
+}
+function applyFilter(){
+  document.querySelectorAll('.finding').forEach(el=>{
+    el.style.display=hidden.has(el.dataset.sev)?'none':'';
+  });
+}
+
+function collectOptions(){
+  const targets=$('targets').value;
+  return {
+    targets, authorized:$('authorized').checked,
+    no_http:!$('opt_http').checked, no_ports:!$('opt_ports').checked,
+    no_cve:!$('opt_cve').checked, passive_only:$('opt_passive').checked,
+    wpscan_api_key:$('k_wpscan').value, nvd_api_key:$('k_nvd').value,
+    shodan_api_key:$('k_shodan').value,
+    ports:$('p_ports').value, max_cves:+$('p_maxcve').value||10,
+    user_enum_max:+$('p_userenum').value||3, timeout:+$('p_timeout').value||8,
+  };
+}
+
+async function runScan(){
+  const opts=collectOptions();
+  results=[]; hidden.clear();
+  $('results').innerHTML=''; $('sumbar').style.display='none';
+  $('run').disabled=true; $('export').disabled=true; $('clear').disabled=true;
+  let total=0, done=0;
+  const setStatus=(html)=>$('status').innerHTML=html;
+  setStatus('<div class="spinner"></div> Starte Scan …');
+
+  try{
+    const resp=await fetch('/api/scan',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(opts)});
+    if(!resp.ok || !resp.body){throw new Error('HTTP '+resp.status);}
+    const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+    while(true){
+      const {value,done:rd}=await reader.read(); if(rd)break;
+      buf+=dec.decode(value,{stream:true}); let i;
+      while((i=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,i); buf=buf.slice(i+1);
+        if(!line.trim())continue;
+        const ev=JSON.parse(line);
+        if(ev.type==='meta'){ total=ev.total;
+          setStatus(`<div class="spinner"></div> Scanne 0/${total} …`);
+        }else if(ev.type==='start'){
+          $('results').insertAdjacentHTML('beforeend',scanningCard(ev.index,ev.target));
+        }else if(ev.type==='result'){
+          const r=ev.data; r.__idx=ev.index; results.push(r);
+          const card=document.querySelector(`.target[data-idx="${ev.index}"]`);
+          const tmp=document.createElement('div'); tmp.innerHTML=targetCard(r);
+          if(card) card.replaceWith(tmp.firstElementChild);
+          else $('results').insertAdjacentHTML('beforeend',targetCard(r));
+          done++; setStatus(`<div class="spinner"></div> Scanne ${done}/${total} …`);
+          renderSummary(); applyFilter();
+        }else if(ev.type==='error'){
+          const r={target:ev.target||'?',__error:ev.error,__idx:ev.index,findings:[]};
+          results.push(r);
+          const card=document.querySelector(`.target[data-idx="${ev.index}"]`);
+          const tmp=document.createElement('div'); tmp.innerHTML=targetCard(r);
+          if(card) card.replaceWith(tmp.firstElementChild);
+          else $('results').insertAdjacentHTML('beforeend',targetCard(r));
+          done++; renderSummary();
+        }else if(ev.type==='done'){
+          setStatus(`<span style="color:var(--accent2)">✓ Fertig — ${done} Ziel(e) gescannt.</span>`);
+        }
+      }
+    }
+  }catch(e){
+    setStatus(`<span style="color:var(--crit)">Fehler: ${esc(e.message)}</span>`);
+  }finally{
+    refreshRun();
+    $('export').disabled=results.length===0;
+    $('clear').disabled=results.length===0;
+  }
+}
+
+$('run').onclick=runScan;
+$('clear').onclick=()=>{results=[];$('results').innerHTML='';$('sumbar').style.display='none';
+  $('status').innerHTML='';$('export').disabled=true;$('clear').disabled=true;};
+$('export').onclick=()=>{
+  const blob=new Blob([JSON.stringify(results,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='passive-recon-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+refreshRun();
+</script>
+</body>
+</html>
