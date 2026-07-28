@@ -459,9 +459,29 @@ def wpscan_findings(is_wp: bool, version: Optional[str], plugins: set,
 # Directory listing
 # --------------------------------------------------------------------------- #
 
+# Signatures of common directory-listing engines:
+#   Apache autoindex / nginx autoindex : "Index of /"
+#   Python http.server                  : "Directory listing for"
+#   IIS                                 : "[To Parent Directory]"
+#   node serve-index (e.g. OWASP Juice  : "listing directory /..." + <ul id="files">
+#   Shop /ftp)
 _INDEX_OF_RE = re.compile(
     r'<title>\s*Index of /|<h1>\s*Index of /|Directory listing for|'
-    r'\[To Parent Directory\]', re.I)
+    r'\[To Parent Directory\]|listing directory\s|'
+    r'<ul[^>]*id=["\']files["\']', re.I)
+
+
+def _normalize_dir_paths(extra_paths: list[str]) -> list[str]:
+    """Turn robots.txt Disallow entries into probe paths (strip glob/query,
+    keep both with and without a trailing slash)."""
+    out: list[str] = []
+    for p in extra_paths:
+        p = p.split("*")[0].split("?")[0].strip()
+        if not p or p == "/":
+            continue
+        if p not in out:
+            out.append(p)
+    return out
 
 
 def check_directory_listing(base_url: str, extra_paths: list[str],
@@ -469,7 +489,9 @@ def check_directory_listing(base_url: str, extra_paths: list[str],
     findings: list[Finding] = []
     root = base_url.rstrip("/")
     seen = set()
-    paths = DIR_CANDIDATES + [p for p in extra_paths if p.endswith("/")]
+    # Probe the built-in candidates plus every robots.txt path (with or without
+    # a trailing slash). Redirects are followed, so "/ftp" -> "/ftp/" works too.
+    paths = list(dict.fromkeys(DIR_CANDIDATES + _normalize_dir_paths(extra_paths)))
     for path in paths:
         if path in seen:
             continue
