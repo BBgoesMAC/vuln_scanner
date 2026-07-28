@@ -1,108 +1,125 @@
 # passive-recon
 
-Nicht-invasive Schwachstellen-Reconnaissance für IPs und Domains.
-Read-only / low-impact: nur einfache GET-Requests und einzelne TCP-Connects.
-**Kein** Brute-Force, **kein** Fuzzing, **keine** Exploits, **keine** schreibenden Zugriffe.
+Non-invasive vulnerability reconnaissance for IPs and domains.
+Read-only / low-impact: only simple GET requests and single TCP connects, plus an
+anonymous-FTP login probe with public credentials. **No** brute-force, **no**
+fuzzing, **no** exploits, **no** write access.
 
-Nur Python-Standardlibrary — keine Installation von Dependencies nötig (Python ≥ 3.9).
+Python standard library only — no dependencies to install (Python ≥ 3.9).
 
-> ⚠️ Nur gegen Systeme einsetzen, für die eine **schriftliche Testfreigabe** (Scope/Auftrag) vorliegt.
+> ⚠️ Only use against systems for which you have explicit **written authorization**
+> to test (scope / engagement).
 
-## Was wird geprüft
+## What it checks
 
-| Check | Kategorie | Methode |
-|-------|-----------|---------|
-| WordPress-Erkennung + Version | `wordpress` | meta-generator, `readme.html`, RSS-Feed |
-| WP User-Enumeration | `wordpress` | `/wp-json/wp/v2/users` + `/?author=N` (N klein) |
-| XML-RPC aktiv | `wordpress` | GET `/xmlrpc.php` |
-| CVE-Abgleich Core & Plugins | `wordpress` | WPScan API (Key nötig) |
-| Directory Listing | `directory-listing` | "Index of /"-Erkennung auf kleiner Pfadliste + robots-Pfaden |
-| Interessante robots.txt-Einträge | `robots` | Filtert Standard-Einträge raus, hebt „juicy" Pfade hervor |
-| HTTP Basic/Digest-Auth Popups | `basic-auth` | 401 + `WWW-Authenticate` |
-| Offene FTP-/SQL-/DB-Ports | `ports` | TCP-Connect + Banner-Grab (kein Login) |
-| **Banner → CVE** | `cve` | Erkennt Produkt+Version im Banner (HTTP `Server`/`X-Powered-By`, FTP, MySQL/MariaDB…), mappt auf CPE und gibt via **NVD-API** die passenden CVEs aus (nach CVSS sortiert) |
-| Security-Header / Banner | `headers` | aus der Root-Antwort |
-| Voll-passiv (optional) | `shodan` | Shodan Host-Lookup, **kein** Kontakt zum Ziel |
+| Check | Category | Method |
+|-------|----------|--------|
+| WordPress detection + version | `wordpress` | meta generator, `readme.html`, RSS feed |
+| WP user enumeration | `wordpress` | `/wp-json/wp/v2/users` + `/?author=N` (small N) |
+| XML-RPC enabled | `wordpress` | GET `/xmlrpc.php` |
+| CVE lookup for core & plugins | `wordpress` | WPScan API (key required) |
+| Directory listing | `directory-listing` | "Index of /" detection on a small path list + robots paths |
+| Interesting robots.txt entries | `robots` | filters out standard entries, highlights "juicy" paths |
+| HTTP basic/digest auth prompts | `basic-auth` | 401 + `WWW-Authenticate` |
+| Open FTP/SQL/DB ports | `ports` | TCP connect + banner grab (no login) |
+| **Anonymous / unauthenticated FTP** | `ports` | anonymous login probe on port 21 (public creds, read-only) |
+| **Banner → CVE** | `cve` | detects product+version in banners (HTTP `Server`/`X-Powered-By`, FTP, MySQL/MariaDB…), maps to a CPE and returns matching CVEs via the **NVD API** (sorted by CVSS) |
+| Security headers / banner | `headers` | from the root response |
+| Fully passive (optional) | `shodan` | Shodan host lookup, **no** contact with the target |
 
-Erkannte Banner für CVE-Abgleich: Apache httpd, nginx, OpenSSH, OpenSSL, PHP,
+Ports probed: 21 (FTP), 3306 (MySQL/MariaDB), 5432 (PostgreSQL), 1433 (MSSQL),
+1521 (Oracle), 27017 (MongoDB), 6379 (Redis), 5984 (CouchDB), 9200 (Elasticsearch),
+11211 (Memcached). Customizable via `--ports`.
+
+Banners recognized for CVE lookup: Apache httpd, nginx, OpenSSH, OpenSSL, PHP,
 Microsoft IIS, lighttpd, Exim, ProFTPD, vsftpd, Pure-FTPd, MySQL, MariaDB.
 
-Geprüfte Ports: 21 (FTP), 3306 (MySQL/MariaDB), 5432 (PostgreSQL), 1433 (MSSQL),
-1521 (Oracle), 27017 (MongoDB), 6379 (Redis), 5984 (CouchDB), 9200 (Elasticsearch),
-11211 (Memcached). Anpassbar über `--ports`.
+## Input formats
 
-## Web-UI (lokal hosten)
+Targets can be given as:
+- a domain: `example.com`, `https://shop.example.com`
+- a single IP: `203.0.113.10`
+- a CIDR block: `10.0.0.0/24` (expanded to individual hosts)
+- an IP range: `10.0.0.1-50` or `10.0.0.1-10.0.0.50`
 
-Schönes Dark-UI im Browser, das denselben Scanner nutzt und Ergebnisse pro Ziel
-live streamt. Läuft nur lokal (`127.0.0.1`), keine externen Dependencies.
+Range/CIDR expansion is capped per range (`--max-hosts`, default 1024) to avoid
+accidentally scanning huge networks.
+
+## Web UI (host locally)
+
+A nice dark UI in the browser that uses the same scanner and streams results live
+per target. Local only (`127.0.0.1`), no external dependencies.
 
 ```bash
 cd passive-recon
 python3 web_app.py            # -> http://127.0.0.1:8787
-python3 web_app.py --open     # startet + öffnet den Browser automatisch
+python3 web_app.py --open     # start and open the browser automatically
 python3 web_app.py --port 9000
 ```
 
-Auf macOS alternativ per Doppelklick: **`start-web.command`**.
+On macOS you can also double-click **`start-web.command`**.
 
-Dann im Browser `http://127.0.0.1:8787` öffnen: Ziele eintragen, Testfreigabe
-bestätigen, „Scan starten". API-Keys optional unter „Erweiterte Optionen"
-(leer = ENV / `config.json` des Servers). Ergebnisse werden ausschließlich lokal
-verarbeitet und können per „Als JSON exportieren" gespeichert werden.
+Then open `http://127.0.0.1:8787`: enter targets, confirm authorization, click
+"Start scan". API keys are optional under "Advanced options" (empty = server's
+ENV / `config.json`). Results are processed locally only and can be saved via
+"Export as JSON".
 
-## Nutzung (CLI)
+## Usage (CLI)
 
 ```bash
-# Einzelziel
+# Single target
 python3 passive_recon.py example.com
 
-# Mehrere Ziele + IP
-python3 passive_recon.py example.com 203.0.113.10
+# Multiple targets, an IP, a CIDR and a range
+python3 passive_recon.py example.com 203.0.113.10 10.0.0.0/24 10.0.0.1-50
 
-# Zielliste aus Datei
+# Targets from a file
 python3 passive_recon.py -f targets.txt
 
-# WPScan-Key setzen (3 Wege möglich)
-export WPSCAN_API_KEY="dein_key"
+# Set the WPScan key (3 ways)
+export WPSCAN_API_KEY="your_key"
 python3 passive_recon.py example.com
-#   ...oder
-python3 passive_recon.py --wpscan-api-key dein_key example.com
-#   ...oder cp config.example.json config.json  und dort eintragen
+#   ...or
+python3 passive_recon.py --wpscan-api-key your_key example.com
+#   ...or cp config.example.json config.json  and put it there
 
-# Ergebnis als JSON exportieren
-python3 passive_recon.py example.com -o ergebnis.json
+# Export results as JSON
+python3 passive_recon.py example.com -o results.json
 
-# Voll passiv (kein Kontakt zum Ziel, nur Shodan-Daten)
-python3 passive_recon.py --passive-only --shodan-api-key dein_key 203.0.113.10
+# Fully passive (no contact with the target, Shodan data only)
+python3 passive_recon.py --passive-only --shodan-api-key your_key 203.0.113.10
 
-# In Skripten/Pipelines ohne Rückfrage (nur mit Auftrag!)
+# Non-interactive for scripts/pipelines (only with an engagement!)
 python3 passive_recon.py -y example.com
 ```
 
-## API-Key hinterlegen
+Disable banner CVE lookup: `--no-cve`. CVEs per product: `--max-cves N`.
+Hosts per range/CIDR: `--max-hosts N`.
 
-Priorität: `--wpscan-api-key` / `--shodan-api-key` → Umgebungsvariable
-`WPSCAN_API_KEY` / `SHODAN_API_KEY` → `config.json`.
+## Storing API keys
 
-`config.json` wird gesucht in: `--config <pfad>` → aktuelles Verzeichnis →
+Priority: `--wpscan-api-key` / `--shodan-api-key` / `--nvd-api-key` →
+environment variable `WPSCAN_API_KEY` / `SHODAN_API_KEY` / `NVD_API_KEY` →
+`config.json`.
+
+`config.json` is looked up in: `--config <path>` → current directory →
 `~/.config/passive-recon/config.json`.
 
 ```bash
 cp config.example.json config.json
-# WPScan-Key kostenlos: https://wpscan.com/api  (25 Requests/Tag im Free-Tier)
-# NVD-Key kostenlos:    https://nvd.nist.gov/developers/request-an-api-key
-#   (ohne NVD-Key funktioniert der CVE-Abgleich auch, ist nur langsamer:
-#    5 statt 50 Requests / 30 s → ca. 6 s Wartezeit pro Produkt-Lookup)
+# WPScan key (free):  https://wpscan.com/api  (25 requests/day on the free tier)
+# NVD key (free):     https://nvd.nist.gov/developers/request-an-api-key
+#   (the CVE lookup also works without an NVD key, just slower:
+#    5 vs. 50 requests / 30 s → ~6 s wait per product lookup)
 ```
 
-Banner-CVE-Abgleich abschalten: `--no-cve`. Anzahl CVEs pro Produkt: `--max-cves N`.
+## Note on "passive"
 
-## Hinweis zu „passiv"
+Real WP enumeration, directory listing, robots.txt, the anonymous-FTP probe and
+port status all require minimal contact with the target. The tool keeps this as
+small as possible (single GETs, one TCP connect per port, no retries, no
+payloads; the FTP probe uses only public `anonymous` credentials and never
+writes). If you want **zero** contact, use `--passive-only` (Shodan).
 
-Echte WP-Enumeration, Directory-Listing, robots.txt und Port-Status setzen einen
-minimalen Kontakt mit dem Ziel voraus. Das Tool hält diesen so gering wie möglich
-(einzelne GETs, ein TCP-Connect pro Port, keine Wiederholungen, keine Payloads).
-Wer **null** Kontakt will, nutzt `--passive-only` (Shodan).
-
-Für einen vollen, aktiven Vuln-Scan (OpenVAS/Greenbone, Nessus, Nuclei) ist dieses
-Tool bewusst nicht gedacht — das wäre invasiv.
+This tool is intentionally not a full active vulnerability scanner
+(OpenVAS/Greenbone, Nessus, Nuclei) — that would be invasive.

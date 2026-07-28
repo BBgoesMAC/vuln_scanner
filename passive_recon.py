@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-passive-recon — Nicht-invasive Schwachstellen-Reconnaissance fuer IPs & Domains.
+passive-recon — Non-invasive vulnerability reconnaissance for IPs & domains.
 
-Ziel: Read-only / low-impact Checks. KEIN Brute-Force, KEIN Fuzzing, KEINE
-Exploits, KEINE schreibenden Zugriffe. Nur einfache GET-Requests und einzelne
-TCP-Connects (Banner-Grab). Optional voll-passiv ueber Shodan (kein Kontakt zum Ziel).
+Goal: read-only / low-impact checks. NO brute-force, NO fuzzing, NO exploits,
+NO write access. Only simple GET requests and single TCP connects (banner grab),
+plus an anonymous-FTP login probe with public credentials. Optionally fully
+passive via Shodan (no contact with the target at all).
 
-Nur mit Python-Standardlibrary (keine externen Dependencies).
+Python standard library only (no external dependencies).
 
-WICHTIG: Nur gegen Systeme einsetzen, fuer die eine ausdrueckliche schriftliche
-Testfreigabe (Scope/Auftrag) vorliegt.
+IMPORTANT: Only use against systems for which you have explicit written
+authorization to test (scope / engagement).
 """
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures as futures
+import ipaddress
 import json
 import os
 import re
@@ -27,23 +29,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field, asdict
-from html.parser import HTMLParser
 from typing import Optional
 
 # --------------------------------------------------------------------------- #
-# Konfiguration / Defaults
+# Configuration / defaults
 # --------------------------------------------------------------------------- #
 
 DEFAULT_UA = "passive-recon/1.0 (+authorized security assessment)"
 DEFAULT_TIMEOUT = 8.0
-DEFAULT_USER_ENUM_MAX = 3          # /?author=1..N  (klein halten = nicht-invasiv)
+DEFAULT_USER_ENUM_MAX = 3          # /?author=1..N  (keep small = non-invasive)
 DEFAULT_PORT_TIMEOUT = 3.0
+DEFAULT_MAX_HOSTS = 1024           # per-range expansion cap (CIDR / ranges)
 WPSCAN_API = "https://wpscan.com/api/v3"
 SHODAN_API = "https://api.shodan.io"
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
-DEFAULT_MAX_CVES = 10              # max. CVEs pro erkanntem Produkt/Banner
+DEFAULT_MAX_CVES = 10              # max CVEs per detected product/banner
 
-# SQL-/DB- und FTP-Ports die geprueft werden (single TCP connect, kein Login)
+# SQL/DB and FTP ports to probe (single TCP connect, no login except FTP-anon)
 DB_PORTS = {
     21:    "FTP",
     3306:  "MySQL/MariaDB",
@@ -57,23 +59,23 @@ DB_PORTS = {
     11211: "Memcached",
 }
 
-# Kleine, gezielte Liste haeufiger Verzeichnisse fuer Directory-Listing-Check.
-# Bewusst klein gehalten (nicht-invasiv, kein Fuzzing).
+# Small, targeted list of common directories for the directory-listing check.
+# Deliberately kept small (non-invasive, no fuzzing).
 DIR_CANDIDATES = [
     "/", "/wp-content/uploads/", "/wp-content/", "/wp-includes/",
     "/uploads/", "/backup/", "/backups/", "/files/", "/images/",
     "/img/", "/assets/", "/tmp/", "/old/", "/test/", "/.git/",
 ]
 
-# robots.txt Disallow-Eintraege die als "langweilig/Standard" gelten und NICHT
-# gemeldet werden. Alles andere wird als interessant markiert.
+# robots.txt Disallow entries considered "boring/standard" and NOT reported.
+# Everything else is flagged as interesting.
 ROBOTS_BORING = [
     "/wp-admin/", "/wp-includes/", "/cgi-bin/", "/wp-login.php",
     "/xmlrpc.php", "/", "/*?", "/*?*", "/search/", "/?s=",
     "/feed/", "/comments/", "/trackback/", "/author/",
 ]
 
-# Schluesselwoerter die einen robots.txt-Pfad besonders interessant machen.
+# Keywords that make a robots.txt path particularly interesting.
 ROBOTS_JUICY = [
     "admin", "backup", "bak", "old", "config", "conf", "db", "sql",
     "dump", "secret", "private", "priv", "internal", "intern", "test",
@@ -84,7 +86,7 @@ ROBOTS_JUICY = [
 ]
 
 # --------------------------------------------------------------------------- #
-# Farben
+# Colors
 # --------------------------------------------------------------------------- #
 
 class C:
@@ -109,16 +111,16 @@ def sev_color(sev: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Findings-Datenmodell
+# Findings data model
 # --------------------------------------------------------------------------- #
 
 @dataclass
 class Finding:
-    category: str            # z.B. "wordpress", "directory-listing", "ports"
+    category: str            # e.g. "wordpress", "directory-listing", "ports"
     title: str
     severity: str = "info"   # info|low|medium|high|critical
     detail: str = ""
-    evidence: str = ""       # URL / Pfad / Banner
+    evidence: str = ""       # URL / path / banner
 
     def line(self) -> str:
         tag = f"[{self.severity.upper()}]"
@@ -145,7 +147,76 @@ class TargetResult:
 
 
 # --------------------------------------------------------------------------- #
-# HTTP-Helfer (nur GET, folgt Redirects manuell begrenzt)
+# Target expansion (CIDR / IP ranges)
+# --------------------------------------------------------------------------- #
+
+def expand_range(token: str) -> Optional[list[str]]:
+    """Expand a CIDR or hyphenated IP range into a list of IPs.
+
+    Returns None if the token is not a range/CIDR (caller keeps it as-is).
+    Supports:  10.0.0.0/24  ·  10.0.0.1-10.0.0.50  ·  10.0.0.1-50
+    """
+    token = token.strip()
+    if not token:
+        return None
+
+    # CIDR (ignore URLs like https://.../path)
+    if "/" in token and "://" not in token:
+        try:
+            net = ipaddress.ip_network(token, strict=False)
+        except ValueError:
+            return None
+        hosts = [str(h) for h in net.hosts()]
+        return hosts or [str(net.network_address)]
+
+    # a.b.c.d-a.b.c.d  or  a.b.c.d-N
+    m = re.match(r'^(\d{1,3}(?:\.\d{1,3}){3})-(\d{1,3}(?:\.\d{1,3}){3}|\d{1,3})$',
+                 token)
+    if m:
+        try:
+            start = ipaddress.ip_address(m.group(1))
+            end_s = m.group(2)
+            if "." in end_s:
+                end = ipaddress.ip_address(end_s)
+            else:
+                base = m.group(1).rsplit(".", 1)[0]
+                end = ipaddress.ip_address(f"{base}.{end_s}")
+        except ValueError:
+            return None
+        if int(end) < int(start):
+            return None
+        return [str(ipaddress.ip_address(i))
+                for i in range(int(start), int(end) + 1)]
+
+    return None
+
+
+def expand_targets(tokens: list[str],
+                   max_hosts: int = DEFAULT_MAX_HOSTS) -> tuple[list[str], list[str]]:
+    """Expand CIDR/ranges to individual hosts. Returns (targets, notes)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    notes: list[str] = []
+    for tok in tokens:
+        expanded = expand_range(tok)
+        if expanded is None:
+            items = [tok]
+        else:
+            if len(expanded) > max_hosts:
+                notes.append(f"{tok}: {len(expanded)} hosts capped to {max_hosts} "
+                             f"(raise --max-hosts to scan more)")
+                expanded = expanded[:max_hosts]
+            items = expanded
+        for t in items:
+            t = t.strip()
+            if t and not t.startswith("#") and t not in seen:
+                seen.add(t)
+                out.append(t)
+    return out, notes
+
+
+# --------------------------------------------------------------------------- #
+# HTTP helper (GET only, manual/limited redirect handling)
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -164,7 +235,7 @@ _UNVERIFIED_CTX.verify_mode = ssl.CERT_NONE
 def http_get(url: str, timeout: float, ua: str,
              max_body: int = 400_000, allow_redirects: bool = True,
              extra_headers: Optional[dict] = None) -> Optional[HttpResponse]:
-    """Ein einzelner, harmloser GET. Gibt None bei Netzwerkfehler zurueck."""
+    """A single, harmless GET. Returns None on network error."""
     headers = {"User-Agent": ua, "Accept": "*/*", "Connection": "close"}
     if extra_headers:
         headers.update(extra_headers)
@@ -200,7 +271,7 @@ def http_get(url: str, timeout: float, ua: str,
 
 
 def pick_base_url(target: str, timeout: float, ua: str) -> Optional[HttpResponse]:
-    """Ermittelt eine erreichbare Basis-URL (https bevorzugt)."""
+    """Find a reachable base URL (https preferred)."""
     if target.startswith("http://") or target.startswith("https://"):
         candidates = [target]
     else:
@@ -213,7 +284,7 @@ def pick_base_url(target: str, timeout: float, ua: str) -> Optional[HttpResponse
 
 
 # --------------------------------------------------------------------------- #
-# WordPress-Erkennung & Version
+# WordPress detection & version
 # --------------------------------------------------------------------------- #
 
 _META_GEN_RE = re.compile(
@@ -228,7 +299,7 @@ _RSS_GEN_RE = re.compile(r'<generator>[^<]*wordpress\.org/\?v=([0-9.]+)', re.I)
 
 def detect_wordpress(base: HttpResponse, base_url: str, timeout: float,
                      ua: str) -> tuple[bool, Optional[str], set, set]:
-    """Gibt (is_wp, version, plugins, themes) zurueck."""
+    """Returns (is_wp, version, plugins, themes)."""
     body = base.body
     is_wp = bool(_WP_HINT_RE.search(body)) or bool(_META_GEN_RE.search(body))
     version = None
@@ -240,7 +311,7 @@ def detect_wordpress(base: HttpResponse, base_url: str, timeout: float,
     plugins = set(_PLUGIN_RE.findall(body))
     themes = set(_THEME_RE.findall(body))
 
-    # readme.html (nicht-invasiv, oeffentliche Datei) fuer Version
+    # readme.html (non-invasive, public file) for the version
     if is_wp and not version:
         r = http_get(base_url.rstrip("/") + "/readme.html", timeout, ua)
         if r and r.status == 200 and "wordpress" in r.body.lower():
@@ -248,7 +319,7 @@ def detect_wordpress(base: HttpResponse, base_url: str, timeout: float,
             if mm:
                 version = mm.group(1)
 
-    # RSS-Feed generator als Fallback
+    # RSS feed generator as fallback
     if is_wp and not version:
         r = http_get(base_url.rstrip("/") + "/feed/", timeout, ua)
         if r and r.status == 200:
@@ -264,7 +335,7 @@ def check_user_enum(base_url: str, timeout: float, ua: str,
     findings: list[Finding] = []
     root = base_url.rstrip("/")
 
-    # 1) REST-API: /wp-json/wp/v2/users  (haeufig offen)
+    # 1) REST API: /wp-json/wp/v2/users  (often open)
     r = http_get(root + "/wp-json/wp/v2/users", timeout, ua)
     if r and r.status == 200 and r.body.strip().startswith("["):
         try:
@@ -273,14 +344,14 @@ def check_user_enum(base_url: str, timeout: float, ua: str,
             names = [n for n in names if n]
             if names:
                 findings.append(Finding(
-                    "wordpress", "WP User-Enumeration via REST-API moeglich",
+                    "wordpress", "WP user enumeration via REST API possible",
                     "high",
-                    detail="Benutzer: " + ", ".join(names[:20]),
+                    detail="Users: " + ", ".join(names[:20]),
                     evidence=root + "/wp-json/wp/v2/users"))
         except json.JSONDecodeError:
             pass
 
-    # 2) /?author=N  -> Redirect auf /author/<login>/
+    # 2) /?author=N  -> redirect to /author/<login>/
     found_authors = {}
     for i in range(1, max_ids + 1):
         r = http_get(f"{root}/?author={i}", timeout, ua, allow_redirects=False)
@@ -298,8 +369,8 @@ def check_user_enum(base_url: str, timeout: float, ua: str,
     if found_authors:
         listing = ", ".join(f"{k}:{v}" for k, v in found_authors.items())
         findings.append(Finding(
-            "wordpress", "WP User-Enumeration via ?author= moeglich", "medium",
-            detail="ID:Login  -> " + listing,
+            "wordpress", "WP user enumeration via ?author= possible", "medium",
+            detail="ID:login -> " + listing,
             evidence=f"{root}/?author=1"))
     return findings
 
@@ -311,9 +382,9 @@ def check_xmlrpc(base_url: str, timeout: float, ua: str) -> list[Finding]:
             "XML-RPC server accepts POST requests only" in r.body
             or "xmlrpc" in r.body.lower() and r.status == 405):
         return [Finding(
-            "wordpress", "XML-RPC aktiviert (xmlrpc.php erreichbar)", "medium",
-            detail="Kann fuer Brute-Force/Pingback-DDoS/Amplification missbraucht "
-                   "werden. Empfehlung: deaktivieren/beschraenken.",
+            "wordpress", "XML-RPC enabled (xmlrpc.php reachable)", "medium",
+            detail="Can be abused for brute-force / pingback DDoS / amplification. "
+                   "Recommendation: disable or restrict.",
             evidence=root + "/xmlrpc.php")]
     return []
 
@@ -334,9 +405,9 @@ def wpscan_lookup(kind: str, slug_or_version: str, api_key: str,
     if not r:
         return None
     if r.status == 429:
-        return {"__error__": "WPScan API Rate-Limit erreicht (429)"}
+        return {"__error__": "WPScan API rate limit reached (429)"}
     if r.status == 401:
-        return {"__error__": "WPScan API Key ungueltig (401)"}
+        return {"__error__": "WPScan API key invalid (401)"}
     if r.status != 200:
         return None
     try:
@@ -351,10 +422,10 @@ def wpscan_findings(is_wp: bool, version: Optional[str], plugins: set,
     if not api_key:
         if is_wp:
             findings.append(Finding(
-                "wordpress", "WPScan-Abgleich uebersprungen (kein API-Key)",
+                "wordpress", "WPScan lookup skipped (no API key)",
                 "info",
-                detail="Setze WPSCAN_API_KEY oder --wpscan-api-key fuer "
-                       "Versions-/Plugin-CVE-Abgleich."))
+                detail="Set WPSCAN_API_KEY or --wpscan-api-key to enable "
+                       "version/plugin CVE lookup."))
         return findings
 
     def _emit(data: dict, label: str):
@@ -366,7 +437,7 @@ def wpscan_findings(is_wp: bool, version: Optional[str], plugins: set,
         for _key, entry in data.items():
             vulns = entry.get("vulnerabilities", []) if isinstance(entry, dict) else []
             for v in vulns:
-                title = v.get("title", "Unbekannte Schwachstelle")
+                title = v.get("title", "Unknown vulnerability")
                 refs = v.get("references", {}) or {}
                 cve = ""
                 if refs.get("cve"):
@@ -377,15 +448,15 @@ def wpscan_findings(is_wp: bool, version: Optional[str], plugins: set,
 
     if version:
         _emit(wpscan_lookup("wordpresses", version, api_key, timeout),
-              f"WP-Core {version}")
-    for slug in sorted(plugins)[:15]:   # begrenzen (API-Quota schonen)
+              f"WP core {version}")
+    for slug in sorted(plugins)[:15]:   # limit (preserve API quota)
         _emit(wpscan_lookup("plugins", slug, api_key, timeout),
               f"Plugin {slug}")
     return findings
 
 
 # --------------------------------------------------------------------------- #
-# Directory Listing
+# Directory listing
 # --------------------------------------------------------------------------- #
 
 _INDEX_OF_RE = re.compile(
@@ -407,7 +478,7 @@ def check_directory_listing(base_url: str, extra_paths: list[str],
         r = http_get(url, timeout, ua)
         if r and r.status == 200 and _INDEX_OF_RE.search(r.body):
             findings.append(Finding(
-                "directory-listing", f"Directory Listing offen: {path}",
+                "directory-listing", f"Directory listing exposed: {path}",
                 "medium", evidence=url))
     return findings
 
@@ -440,19 +511,19 @@ def check_robots(base_url: str, timeout: float, ua: str) -> tuple[list[Finding],
                 path not in ROBOTS_BORING and not low.startswith("/wp-")):
             interesting.append(path)
 
-    # de-dup, priorisieren
+    # de-dup, prioritize
     interesting = list(dict.fromkeys(interesting))
     for path in interesting:
         low = path.lower()
         sev = "medium" if any(j in low for j in ROBOTS_JUICY) else "low"
         findings.append(Finding(
-            "robots", f"Interessanter robots.txt Eintrag: {path}", sev,
+            "robots", f"Interesting robots.txt entry: {path}", sev,
             evidence=root + path.replace("*", "")))
     return findings, disallowed
 
 
 # --------------------------------------------------------------------------- #
-# Basic-Auth Popups (401 + WWW-Authenticate: Basic)
+# Basic-auth prompts (401 + WWW-Authenticate)
 # --------------------------------------------------------------------------- #
 
 BASIC_AUTH_PATHS = ["/", "/wp-admin/", "/admin/", "/login/", "/manager/",
@@ -481,14 +552,14 @@ def check_basic_auth(base_url: str, timeout: float, ua: str) -> list[Finding]:
             if scheme.lower() in ("basic", "digest", "ntlm", "negotiate", "?"):
                 findings.append(Finding(
                     "basic-auth",
-                    f"HTTP-Auth Popup ({scheme}) auf {path}", "low",
+                    f"HTTP auth prompt ({scheme}) on {path}", "low",
                     detail=f"realm: {realm}" if realm else "",
                     evidence=url))
     return findings
 
 
 # --------------------------------------------------------------------------- #
-# Security-Header (Bonus, rein passiv aus der Root-Antwort)
+# Security headers (bonus, purely passive from the root response)
 # --------------------------------------------------------------------------- #
 
 def check_headers(base: HttpResponse, base_url: str) -> list[Finding]:
@@ -499,7 +570,7 @@ def check_headers(base: HttpResponse, base_url: str) -> list[Finding]:
     banner = ", ".join(x for x in [server, powered] if x)
     if banner:
         findings.append(Finding(
-            "headers", "Server-/Technologie-Banner offengelegt", "info",
+            "headers", "Server/technology banner disclosed", "info",
             detail=banner, evidence=base_url))
     missing = []
     for hdr in ("strict-transport-security", "content-security-policy",
@@ -508,21 +579,22 @@ def check_headers(base: HttpResponse, base_url: str) -> list[Finding]:
             missing.append(hdr)
     if missing:
         findings.append(Finding(
-            "headers", "Fehlende Security-Header", "low",
+            "headers", "Missing security headers", "low",
             detail=", ".join(missing)))
     return findings
 
 
 # --------------------------------------------------------------------------- #
-# Port-Checks (TCP connect + Banner). Nicht-invasiv: 1 Connect, kein Login.
+# Port checks (TCP connect + banner). Non-invasive: 1 connect, no login,
+# except an anonymous-FTP probe with public credentials on port 21.
 # --------------------------------------------------------------------------- #
 
 def grab_banner(ip: str, port: int, timeout: float) -> Optional[str]:
     try:
         with socket.create_connection((ip, port), timeout=timeout) as s:
             s.settimeout(timeout)
-            # Fuer manche Dienste erst nach Prompt/Probe. FTP/Redis liefern
-            # ungefragt ein Banner; MySQL sendet Handshake sofort.
+            # Some services only respond after a prompt/probe. FTP/Redis send a
+            # banner unsolicited; MySQL sends its handshake immediately.
             try:
                 data = s.recv(256)
             except socket.timeout:
@@ -532,11 +604,53 @@ def grab_banner(ip: str, port: int, timeout: float) -> Optional[str]:
         return None
 
 
+def check_ftp_anonymous(ip: str, timeout: float) -> Optional[Finding]:
+    """Probe for anonymous / unauthenticated FTP login using public
+    credentials (anonymous / anonymous@). Read-only, low-impact: no writes,
+    no brute-force. Reports a HIGH finding if the login succeeds."""
+    from ftplib import FTP, all_errors
+    ftp = FTP()
+    try:
+        ftp.connect(ip, 21, timeout=max(timeout, 5.0))
+        welcome = (ftp.getwelcome() or "").strip()
+        ftp.login("anonymous", "anonymous@example.com")
+    except all_errors:
+        try:
+            ftp.close()
+        except Exception:
+            pass
+        return None
+
+    # Login succeeded -> anonymous access allowed.
+    listing: list[str] = []
+    try:
+        listing = ftp.nlst()[:8]
+    except all_errors:
+        listing = []
+    try:
+        ftp.quit()
+    except all_errors:
+        try:
+            ftp.close()
+        except Exception:
+            pass
+
+    detail = "Anonymous login permitted (user 'anonymous')."
+    if welcome:
+        detail += f" Banner: {welcome}"
+    if listing:
+        detail += " | root listing: " + ", ".join(listing)
+    return Finding(
+        "ports", "Anonymous / unauthenticated FTP login allowed", "high",
+        detail=detail, evidence=f"{ip}:21")
+
+
 def check_ports(ip: str, ports: dict, timeout: float,
                 max_workers: int = 8) -> tuple[list[Finding], list[tuple]]:
-    """Gibt (findings, banners) zurueck. banners: [(banner, evidence, hint)]."""
+    """Returns (findings, banners). banners: [(banner, evidence, hint)]."""
     findings: list[Finding] = []
     banners: list[tuple] = []
+    open_ports: set[int] = set()
 
     def _probe(item):
         port, name = item
@@ -553,14 +667,22 @@ def check_ports(ip: str, ports: dict, timeout: float,
             if res is None:
                 continue
             port, name, banner = res
+            open_ports.add(port)
             sev = "high" if port in (3306, 5432, 1433, 1521, 27017, 6379,
                                      9200, 11211, 5984) else "medium"
-            detail = f"Banner: {banner}" if banner else "Port offen (kein Banner)"
+            detail = f"Banner: {banner}" if banner else "Port open (no banner)"
             findings.append(Finding(
-                "ports", f"Offener Port {port}/tcp ({name})", sev,
+                "ports", f"Open port {port}/tcp ({name})", sev,
                 detail=detail, evidence=f"{ip}:{port}"))
             if banner:
                 banners.append((banner, f"{ip}:{port}", name))
+
+    # Anonymous-FTP probe when port 21 is open.
+    if 21 in open_ports:
+        anon = check_ftp_anonymous(ip, timeout)
+        if anon:
+            findings.append(anon)
+
     return findings, banners
 
 
@@ -580,8 +702,8 @@ def resolve_ip(target: str) -> Optional[str]:
 # Banner -> CPE -> CVE (NVD API)
 # --------------------------------------------------------------------------- #
 
-# Jeder Eintrag: (regex mit Versions-Gruppe, Anzeige-Name, [CPE-Kandidaten]).
-# CPE-Kandidaten werden der Reihe nach abgefragt; der erste Treffer gewinnt.
+# Each entry: (regex with version group, display name, [CPE candidates]).
+# CPE candidates are queried in order; the first match wins.
 BANNER_MATCHERS = [
     (re.compile(r'Apache/(\d+\.\d+(?:\.\d+)?)', re.I),
      "Apache httpd {v}", ["cpe:2.3:a:apache:http_server:{v}"]),
@@ -610,7 +732,7 @@ BANNER_MATCHERS = [
 
 
 def parse_banner(banner: str, hint: str = "") -> list[tuple[str, list[str]]]:
-    """Extrahiert (Anzeige-Name, [CPE-Kandidaten]) aus einem Banner-String."""
+    """Extract (display name, [CPE candidates]) from a banner string."""
     out: list[tuple[str, list[str]]] = []
     seen: set[str] = set()
 
@@ -625,7 +747,7 @@ def parse_banner(banner: str, hint: str = "") -> list[tuple[str, list[str]]]:
         seen.add(name)
         out.append((name, [t.format(v=v) for t in cpe_tpls]))
 
-    # DB-Handshakes (Version steht im Klartext, aber ohne Produktnamen)
+    # DB handshakes (version is in cleartext but without the product name)
     low_hint = hint.lower()
     if "mysql" in low_hint or "mariadb" in low_hint or "mariadb" in banner.lower():
         mm = re.search(r'(\d+\.\d+\.\d+)-MariaDB', banner) \
@@ -666,8 +788,8 @@ def _first_desc(cve: dict) -> str:
 
 
 class NvdClient:
-    """Fragt die NVD-API ab (mit Throttling, Cache). Kein Key noetig, aber
-    empfohlen (5 vs. 50 Requests/30s)."""
+    """Queries the NVD API (with throttling + cache). No key required, but
+    recommended (5 vs. 50 requests / 30 s)."""
 
     def __init__(self, api_key: str, timeout: float,
                  max_cves: int = DEFAULT_MAX_CVES, enabled: bool = True):
@@ -732,13 +854,13 @@ class NvdClient:
                     evidence=f"https://nvd.nist.gov/vuln/detail/{cid}  [{evidence}]"))
             if len(scored) > len(top):
                 findings.append(Finding(
-                    "cve", f"{name}: +{len(scored) - len(top)} weitere CVEs",
-                    "info", detail=f"gekuerzt (--max-cves erhoehen); CPE {used}"))
+                    "cve", f"{name}: +{len(scored) - len(top)} more CVEs",
+                    "info", detail=f"truncated (raise --max-cves); CPE {used}"))
         return findings
 
 
 # --------------------------------------------------------------------------- #
-# Shodan (voll-passiv, optional)
+# Shodan (fully passive, optional)
 # --------------------------------------------------------------------------- #
 
 def shodan_lookup(ip: str, api_key: str, timeout: float) -> list[Finding]:
@@ -747,7 +869,7 @@ def shodan_lookup(ip: str, api_key: str, timeout: float) -> list[Finding]:
     r = http_get(url, timeout, DEFAULT_UA)
     if not r or r.status != 200:
         if r and r.status == 401:
-            findings.append(Finding("shodan", "Shodan API Key ungueltig", "info"))
+            findings.append(Finding("shodan", "Shodan API key invalid", "info"))
         return findings
     try:
         data = json.loads(r.body)
@@ -759,7 +881,7 @@ def shodan_lookup(ip: str, api_key: str, timeout: float) -> list[Finding]:
         name = DB_PORTS.get(port, svc.get("_shodan", {}).get("module", ""))
         sev = "high" if port in DB_PORTS and DB_PORTS[port] != "FTP" else "medium"
         findings.append(Finding(
-            "shodan", f"[Shodan] Port {port}/tcp {name} {product}".strip(),
+            "shodan", f"[Shodan] port {port}/tcp {name} {product}".strip(),
             sev, evidence=f"{ip}:{port}"))
     for vuln in data.get("vulns", []):
         findings.append(Finding("shodan", f"[Shodan] {vuln}", "high"))
@@ -767,7 +889,7 @@ def shodan_lookup(ip: str, api_key: str, timeout: float) -> list[Finding]:
 
 
 # --------------------------------------------------------------------------- #
-# Scan-Orchestrierung pro Ziel
+# Per-target scan orchestration
 # --------------------------------------------------------------------------- #
 
 def scan_target(target: str, cfg: dict) -> TargetResult:
@@ -777,16 +899,16 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
 
     res.resolved_ip = resolve_ip(target)
 
-    # ---- Voll-passiver Modus: nur Shodan ----
+    # ---- Fully passive mode: Shodan only ----
     if cfg.get("passive_only"):
         if res.resolved_ip and cfg.get("shodan_api_key"):
             for f in shodan_lookup(res.resolved_ip, cfg["shodan_api_key"], timeout):
                 res.add(f)
         else:
-            res.errors.append("passive-only: benoetigt aufloesbare IP + Shodan-Key")
+            res.errors.append("passive-only: requires a resolvable IP + Shodan key")
         return res
 
-    # ---- Port-Checks ----
+    # ---- Port checks ----
     banners_for_cve: list[tuple] = []   # (banner, evidence, hint)
 
     if res.resolved_ip and not cfg.get("no_ports"):
@@ -796,16 +918,16 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
             res.add(f)
         banners_for_cve += port_banners
 
-    # ---- Optional zusaetzlich Shodan ----
+    # ---- Optionally also Shodan ----
     if cfg.get("shodan_api_key") and res.resolved_ip:
         for f in shodan_lookup(res.resolved_ip, cfg["shodan_api_key"], timeout):
             res.add(f)
 
-    # ---- HTTP-basierte Checks ----
+    # ---- HTTP-based checks ----
     if not cfg.get("no_http"):
         base = pick_base_url(target, timeout, ua)
         if base is None:
-            res.errors.append("Kein HTTP(S) erreichbar")
+            res.errors.append("No HTTP(S) reachable")
             return res
         base_url = base.final_url
         res.base_url = base_url
@@ -813,7 +935,7 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
         for f in check_headers(base, base_url):
             res.add(f)
 
-        # HTTP-Banner (Server / X-Powered-By) fuer CVE-Abgleich sammeln
+        # Collect HTTP banners (Server / X-Powered-By) for CVE lookup
         _h = {k.lower(): v for k, v in base.headers.items()}
         for hk in ("server", "x-powered-by"):
             if _h.get(hk):
@@ -831,8 +953,8 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
 
         is_wp, version, plugins, themes = detect_wordpress(base, base_url, timeout, ua)
         if is_wp:
-            v = f" (Version {version})" if version else " (Version unbekannt)"
-            res.add(Finding("wordpress", f"WordPress erkannt{v}", "info",
+            v = f" (version {version})" if version else " (version unknown)"
+            res.add(Finding("wordpress", f"WordPress detected{v}", "info",
                             detail=(f"Plugins: {', '.join(sorted(plugins))}"
                                     if plugins else ""),
                             evidence=base_url))
@@ -859,7 +981,7 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
 
 
 # --------------------------------------------------------------------------- #
-# Ausgabe
+# Output
 # --------------------------------------------------------------------------- #
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
@@ -869,9 +991,9 @@ def print_result(res: TargetResult) -> None:
     print()
     print(C.wrap("=" * 70, C.BLUE))
     ip = f"  ({res.resolved_ip})" if res.resolved_ip else ""
-    print(C.wrap(f" ZIEL: {res.target}{ip}", C.BOLD))
+    print(C.wrap(f" TARGET: {res.target}{ip}", C.BOLD))
     if res.base_url:
-        print(C.wrap(f" URL:  {res.base_url}", C.DIM))
+        print(C.wrap(f" URL:    {res.base_url}", C.DIM))
     print(C.wrap("=" * 70, C.BLUE))
 
     if res.errors:
@@ -879,7 +1001,7 @@ def print_result(res: TargetResult) -> None:
             print(C.wrap(f"  [!] {e}", C.YELLOW))
 
     if not res.findings:
-        print(C.wrap("  Keine Findings.", C.DIM))
+        print(C.wrap("  No findings.", C.DIM))
         return
 
     findings = sorted(res.findings, key=lambda f: (SEV_ORDER.get(f.severity, 9),
@@ -887,7 +1009,7 @@ def print_result(res: TargetResult) -> None:
     for f in findings:
         print(f.line())
 
-    # Zusammenfassung
+    # Summary
     counts: dict[str, int] = {}
     for f in findings:
         counts[f.severity] = counts.get(f.severity, 0) + 1
@@ -900,7 +1022,7 @@ def print_result(res: TargetResult) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Config laden
+# Load config
 # --------------------------------------------------------------------------- #
 
 def load_config_file(path: Optional[str]) -> dict:
@@ -928,33 +1050,36 @@ def load_config_file(path: Optional[str]) -> dict:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="passive-recon",
-        description="Nicht-invasive Schwachstellen-Reconnaissance (read-only).",
-        epilog="Nur mit ausdruecklicher Testfreigabe einsetzen.")
-    p.add_argument("targets", nargs="*", help="IPs und/oder Domains")
-    p.add_argument("-f", "--file", help="Datei mit Zielen (eine pro Zeile)")
-    p.add_argument("-o", "--output", help="Ergebnisse als JSON in Datei schreiben")
-    p.add_argument("--config", help="Pfad zur config.json")
-    p.add_argument("--wpscan-api-key", help="WPScan API Key (oder WPSCAN_API_KEY / config.json)")
-    p.add_argument("--shodan-api-key", help="Shodan API Key (oder SHODAN_API_KEY / config.json)")
-    p.add_argument("--nvd-api-key", help="NVD API Key fuer Banner-CVE-Abgleich "
-                   "(oder NVD_API_KEY / config.json; optional, aber schneller)")
+        description="Non-invasive vulnerability reconnaissance (read-only).",
+        epilog="Only use with explicit written authorization.")
+    p.add_argument("targets", nargs="*",
+                   help="IPs, domains, CIDRs (10.0.0.0/24) or ranges (10.0.0.1-50)")
+    p.add_argument("-f", "--file", help="File with targets (one per line)")
+    p.add_argument("-o", "--output", help="Write results to a JSON file")
+    p.add_argument("--config", help="Path to config.json")
+    p.add_argument("--wpscan-api-key", help="WPScan API key (or WPSCAN_API_KEY / config.json)")
+    p.add_argument("--shodan-api-key", help="Shodan API key (or SHODAN_API_KEY / config.json)")
+    p.add_argument("--nvd-api-key", help="NVD API key for banner CVE lookup "
+                   "(or NVD_API_KEY / config.json; optional, but faster)")
     p.add_argument("--no-cve", action="store_true",
-                   help="Banner-CVE-Abgleich (NVD) deaktivieren")
+                   help="Disable banner CVE lookup (NVD)")
     p.add_argument("--max-cves", type=int, default=DEFAULT_MAX_CVES,
-                   help="Max. CVEs pro erkanntem Produkt/Banner")
+                   help="Max CVEs per detected product/banner")
+    p.add_argument("--max-hosts", type=int, default=DEFAULT_MAX_HOSTS,
+                   help="Max hosts to expand per CIDR/range")
     p.add_argument("--passive-only", action="store_true",
-                   help="Voll passiv: kein Kontakt zum Ziel, nur Shodan")
-    p.add_argument("--no-ports", action="store_true", help="Port-Checks ueberspringen")
-    p.add_argument("--no-http", action="store_true", help="HTTP-Checks ueberspringen")
-    p.add_argument("--ports", help="Kommagetrennte Portliste ueberschreiben, z.B. 21,3306,5432")
-    p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP-Timeout (s)")
-    p.add_argument("--port-timeout", type=float, default=DEFAULT_PORT_TIMEOUT, help="Port-Timeout (s)")
+                   help="Fully passive: no contact with the target, Shodan only")
+    p.add_argument("--no-ports", action="store_true", help="Skip port checks")
+    p.add_argument("--no-http", action="store_true", help="Skip HTTP checks")
+    p.add_argument("--ports", help="Override port list, comma-separated, e.g. 21,3306,5432")
+    p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP timeout (s)")
+    p.add_argument("--port-timeout", type=float, default=DEFAULT_PORT_TIMEOUT, help="Port timeout (s)")
     p.add_argument("--user-enum-max", type=int, default=DEFAULT_USER_ENUM_MAX,
-                   help="Max. Author-IDs fuer WP User-Enum")
+                   help="Max author IDs for WP user enumeration")
     p.add_argument("--user-agent", default=DEFAULT_UA, help="HTTP User-Agent")
-    p.add_argument("--no-color", action="store_true", help="Farben deaktivieren")
+    p.add_argument("--no-color", action="store_true", help="Disable colors")
     p.add_argument("-y", "--yes", action="store_true",
-                   help="Freigabe-Bestaetigung ueberspringen (nur mit Auftrag!)")
+                   help="Skip the authorization confirmation (only with an engagement!)")
     return p
 
 
@@ -971,13 +1096,15 @@ def main(argv: Optional[list[str]] = None) -> int:
                 targets += [ln.strip() for ln in fh
                             if ln.strip() and not ln.strip().startswith("#")]
         except OSError as e:
-            print(f"Fehler beim Lesen von {args.file}: {e}", file=sys.stderr)
+            print(f"Error reading {args.file}: {e}", file=sys.stderr)
             return 2
 
-    targets = list(dict.fromkeys(targets))   # de-dup, Reihenfolge erhalten
+    targets, notes = expand_targets(targets, args.max_hosts)
     if not targets:
         build_parser().print_help()
         return 2
+    for n in notes:
+        print(C.wrap(f"  [i] {n}", C.YELLOW))
 
     filecfg = load_config_file(args.config)
     wpscan_key = (args.wpscan_api_key or os.environ.get("WPSCAN_API_KEY")
@@ -992,26 +1119,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             ports = {int(p.strip()): DB_PORTS.get(int(p.strip()), "custom")
                      for p in args.ports.split(",") if p.strip()}
         except ValueError:
-            print("Ungueltige --ports Angabe", file=sys.stderr)
+            print("Invalid --ports value", file=sys.stderr)
             return 2
     else:
         ports = DB_PORTS
 
-    # Freigabe-Hinweis
+    # Authorization notice
     if not args.yes:
         print(C.wrap(
-            "\n  RECHTLICHER HINWEIS: Nur gegen Systeme einsetzen, fuer die eine\n"
-            "  schriftliche Testfreigabe (Scope/Auftrag) vorliegt.\n", C.YELLOW))
-        print("  Ziele:")
-        for t in targets:
+            "\n  LEGAL NOTICE: Only use against systems for which you have\n"
+            "  explicit written authorization to test (scope / engagement).\n",
+            C.YELLOW))
+        print("  Targets:")
+        for t in targets[:50]:
             print(f"    - {t}")
+        if len(targets) > 50:
+            print(f"    ... and {len(targets) - 50} more")
         try:
-            ans = input("\n  Testfreigabe vorhanden? Fortfahren? [y/N] ").strip().lower()
+            ans = input("\n  Authorized to test these targets? Continue? [y/N] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return 1
-        if ans not in ("y", "yes", "j", "ja"):
-            print("  Abgebrochen.")
+        if ans not in ("y", "yes"):
+            print("  Aborted.")
             return 1
 
     cfg = {
@@ -1034,24 +1164,23 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             res = scan_target(t, cfg)
         except KeyboardInterrupt:
-            print("\n  Abgebrochen.")
+            print("\n  Aborted.")
             break
-        except Exception as e:                      # robust weiter
-            res = TargetResult(target=t, errors=[f"Interner Fehler: {e}"])
+        except Exception as e:                      # keep going, stay robust
+            res = TargetResult(target=t, errors=[f"Internal error: {e}"])
         all_results.append(res)
         print_result(res)
 
     if args.output:
         payload = []
         for r in all_results:
-            d = asdict(r)
-            payload.append(d)
+            payload.append(asdict(r))
         try:
             with open(args.output, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2, ensure_ascii=False)
-            print(C.wrap(f"\n  JSON gespeichert: {args.output}", C.GREEN))
+            print(C.wrap(f"\n  JSON saved: {args.output}", C.GREEN))
         except OSError as e:
-            print(f"Fehler beim Schreiben: {e}", file=sys.stderr)
+            print(f"Error writing file: {e}", file=sys.stderr)
 
     return 0
 

@@ -1,5 +1,5 @@
 {
-  "wpscan_api_key": "HIER_DEINEN_WPSCAN_API_KEY_EINTRAGEN",
+  "wpscan_api_key": "PUT_YOUR_WPSCAN_API_KEY_HERE",
   "shodan_api_key": "OPTIONAL_SHODAN_API_KEY",
   "nvd_api_key": "OPTIONAL_NVD_API_KEY"
 }

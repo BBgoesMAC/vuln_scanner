@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-passive-recon Web-UI — lokaler Webserver (nur Python-Standardlibrary).
+passive-recon web UI — local web server (Python standard library only).
 
-Startet ein schoenes lokales Frontend fuer passive_recon.py. Ergebnisse werden
-pro Ziel live gestreamt (NDJSON). Bindet standardmaessig nur an 127.0.0.1.
+Serves a nice local frontend for passive_recon.py. Results are streamed live
+per target (NDJSON). Binds to 127.0.0.1 only by default.
 
     python3 web_app.py                 # -> http://127.0.0.1:8787
     python3 web_app.py --port 9000
@@ -26,7 +26,7 @@ FILECFG = pr.load_config_file(None)
 
 
 def _key(opts: dict, name: str, env: str) -> str:
-    """Reihenfolge: Formular -> ENV -> config.json."""
+    """Priority: form -> ENV -> config.json."""
     return (opts.get(name) or os.environ.get(env) or FILECFG.get(name, "") or "").strip()
 
 
@@ -65,28 +65,24 @@ def build_cfg(opts: dict) -> dict:
 
 
 def parse_targets(raw) -> list[str]:
+    """Split raw input into tokens, then expand CIDRs/ranges."""
     if isinstance(raw, list):
         items = raw
     else:
         items = str(raw or "").replace(",", "\n").splitlines()
-    out, seen = [], set()
-    for t in (x.strip() for x in items):
-        if t and not t.startswith("#") and t not in seen:
-            seen.add(t)
-            out.append(t)
-    return out
+    return [x.strip() for x in items if x.strip()]
 
 
 class Handler(BaseHTTPRequestHandler):
-    # HTTP/1.0 => Verbindung wird nach dem Handler geschlossen; der Client
-    # erkennt das Stream-Ende am EOF (kein Content-Length noetig).
+    # HTTP/1.0 => the connection is closed after the handler; the client
+    # detects the end of the stream at EOF (no Content-Length needed).
     protocol_version = "HTTP/1.0"
     server_version = "passive-recon-web"
 
-    def log_message(self, fmt, *args):  # ruhiger Log
+    def log_message(self, fmt, *args):  # quieter log
         sys.stderr.write("  %s - %s\n" % (self.address_string(), fmt % args))
 
-    # ---- Schutz gegen DNS-Rebinding: nur localhost-Hosts akzeptieren ----
+    # ---- DNS-rebinding protection: accept localhost hosts only ----
     def _host_ok(self) -> bool:
         host = (self.headers.get("Host", "") or "").split(":")[0]
         return host in ("", "127.0.0.1", "localhost", "::1", "[::1]")
@@ -133,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         except (json.JSONDecodeError, UnicodeDecodeError):
             opts = {}
 
-        # Stream-Header
+        # Streaming headers
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -141,14 +137,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if not opts.get("authorized"):
             self._emit({"type": "error", "index": 0, "target": "",
-                        "error": "Bitte Testfreigabe bestaetigen."})
+                        "error": "Please confirm authorization."})
             self._emit({"type": "done"})
             return
 
-        targets = parse_targets(opts.get("targets"))
+        tokens = parse_targets(opts.get("targets"))
+        try:
+            max_hosts = int(opts.get("max_hosts") or pr.DEFAULT_MAX_HOSTS)
+        except (TypeError, ValueError):
+            max_hosts = pr.DEFAULT_MAX_HOSTS
+        targets, notes = pr.expand_targets(tokens, max_hosts)
+
         if not targets:
             self._emit({"type": "error", "index": 0, "target": "",
-                        "error": "Keine gueltigen Ziele angegeben."})
+                        "error": "No valid targets provided."})
             self._emit({"type": "done"})
             return
 
@@ -156,10 +158,12 @@ class Handler(BaseHTTPRequestHandler):
             cfg = build_cfg(opts)
         except Exception as e:
             self._emit({"type": "error", "index": 0, "target": "",
-                        "error": f"Konfigurationsfehler: {e}"})
+                        "error": f"Configuration error: {e}"})
             self._emit({"type": "done"})
             return
 
+        for n in notes:
+            self._emit({"type": "note", "text": n})
         self._emit({"type": "meta", "total": len(targets)})
         for i, t in enumerate(targets):
             self._emit({"type": "start", "index": i, "target": t})
@@ -180,22 +184,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="passive-recon Web-UI (lokal)")
+    ap = argparse.ArgumentParser(description="passive-recon web UI (local)")
     ap.add_argument("--host", default="127.0.0.1",
-                    help="Bind-Adresse (Default 127.0.0.1 = nur lokal)")
+                    help="Bind address (default 127.0.0.1 = local only)")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--open", action="store_true",
-                    help="Browser automatisch oeffnen")
+                    help="Open the browser automatically")
     args = ap.parse_args(argv)
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("  WARNUNG: Bindung an nicht-lokale Adresse — die Web-UI ist dann\n"
-              "  im Netzwerk erreichbar. Nur in vertrauenswuerdigen Netzen tun.\n",
+        print("  WARNING: binding to a non-local address — the web UI will then\n"
+              "  be reachable on the network. Only do this on trusted networks.\n",
               file=sys.stderr)
 
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}"
-    print(f"\n  passive-recon Web-UI laeuft:  {url}\n  (Strg+C zum Beenden)\n")
+    print(f"\n  passive-recon web UI running:  {url}\n  (Ctrl+C to stop)\n")
     if args.open:
         try:
             webbrowser.open(url)
@@ -204,7 +208,7 @@ def main(argv=None) -> int:
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n  Beendet.")
+        print("\n  Stopped.")
     finally:
         httpd.server_close()
     return 0
