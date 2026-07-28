@@ -25,31 +25,23 @@
   a:hover{text-decoration:underline}
   .wrap{max-width:1120px;margin:0 auto;padding:0 20px 80px}
 
-  header{
-    display:flex;align-items:center;gap:14px;padding:26px 0 18px;
-  }
-  .logo{
-    width:44px;height:44px;border-radius:12px;flex:0 0 auto;
+  header{display:flex;align-items:center;gap:14px;padding:26px 0 18px}
+  .logo{width:44px;height:44px;border-radius:12px;flex:0 0 auto;
     background:linear-gradient(135deg,var(--accent),#7c5bff);
-    display:grid;place-items:center;box-shadow:var(--shadow);
-  }
+    display:grid;place-items:center;box-shadow:var(--shadow)}
   .logo svg{width:24px;height:24px;fill:#fff}
   header h1{margin:0;font-size:22px;letter-spacing:.3px}
   header p{margin:2px 0 0;color:var(--muted);font-size:13px}
   .badge-pill{margin-left:auto;font-size:11px;color:var(--muted);
     border:1px solid var(--border);border-radius:999px;padding:5px 12px}
 
-  .card{
-    background:linear-gradient(180deg,var(--panel),var(--bg2));
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg2));
     border:1px solid var(--border);border-radius:16px;padding:20px;
-    box-shadow:var(--shadow);margin-bottom:18px;
-  }
-  .legal{
-    display:flex;gap:12px;align-items:flex-start;
+    box-shadow:var(--shadow);margin-bottom:18px}
+  .legal{display:flex;gap:12px;align-items:flex-start;
     background:linear-gradient(180deg,#241d10,#1a1509);
     border:1px solid #4a3a12;border-radius:12px;padding:14px 16px;margin-bottom:18px;
-    font-size:13px;color:#e7d6a8;
-  }
+    font-size:13px;color:#e7d6a8}
   .legal svg{width:18px;height:18px;fill:#f0c65a;flex:0 0 auto;margin-top:2px}
   .legal label{display:flex;gap:8px;align-items:center;margin-top:8px;color:#f5e6bd;cursor:pointer}
 
@@ -58,8 +50,7 @@
   textarea,input[type=text],input[type=number],input[type=password]{
     width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;
     color:var(--txt);padding:11px 13px;font-size:14px;font-family:var(--mono);
-    outline:none;transition:border-color .15s,box-shadow .15s;
-  }
+    outline:none;transition:border-color .15s,box-shadow .15s}
   textarea:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.15)}
   textarea{min-height:96px;resize:vertical}
 
@@ -67,11 +58,8 @@
   .row>div{flex:1 1 200px}
 
   .toggles{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
-  .toggle{
-    display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);
-    border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;user-select:none;
-    transition:.15s;
-  }
+  .toggle{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);
+    border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;user-select:none;transition:.15s}
   .toggle:hover{border-color:var(--border2)}
   .toggle input{accent-color:var(--accent);width:15px;height:15px}
   .toggle.on{border-color:var(--accent);background:rgba(91,140,255,.08)}
@@ -85,11 +73,9 @@
   details.adv[open] summary::before{content:'▾ '}
 
   .actions{display:flex;gap:12px;align-items:center;margin-top:20px}
-  button.primary{
-    background:linear-gradient(135deg,var(--accent),#7c5bff);color:#fff;border:0;
+  button.primary{background:linear-gradient(135deg,var(--accent),#7c5bff);color:#fff;border:0;
     border-radius:10px;padding:12px 26px;font-size:15px;font-weight:600;cursor:pointer;
-    box-shadow:0 6px 20px rgba(91,140,255,.35);transition:.15s;
-  }
+    box-shadow:0 6px 20px rgba(91,140,255,.35);transition:.15s}
   button.primary:hover:not(:disabled){transform:translateY(-1px)}
   button.primary:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
   button.ghost{background:transparent;border:1px solid var(--border);color:var(--txt);
@@ -102,9 +88,8 @@
   .spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--accent);
     border-radius:50%;animation:spin .7s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .notes{color:var(--med);font-size:12.5px;margin:0 0 10px}
+  .notes{color:var(--med);font-size:12.5px;margin:0 0 10px;white-space:pre-line}
 
-  /* Summary bar */
   .sumbar{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 20px}
   .chip{display:flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:10px;
     padding:8px 13px;font-size:13px;cursor:pointer;background:var(--panel);user-select:none;transition:.15s}
@@ -115,13 +100,27 @@
   .dot.critical{background:var(--crit)} .dot.high{background:var(--high)}
   .dot.medium{background:var(--med)} .dot.low{background:var(--low)} .dot.info{background:var(--info)}
 
-  /* Target result cards */
-  .target{border:1px solid var(--border);border-radius:16px;margin-bottom:16px;overflow:hidden;
-    background:var(--panel)}
+  .target{border:1px solid var(--border);border-radius:16px;margin-bottom:16px;overflow:hidden;background:var(--panel)}
   .thead{display:flex;align-items:center;gap:12px;padding:15px 18px;background:var(--panel2);
     border-bottom:1px solid var(--border)}
+  .thead .tstate{width:18px;height:18px;flex:0 0 auto;display:grid;place-items:center}
   .thead .tname{font-weight:600;font-size:16px;word-break:break-all}
   .thead .tmeta{color:var(--muted);font-size:12px;font-family:var(--mono);margin-left:auto;text-align:right}
+
+  .tasks{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);
+    background:rgba(255,255,255,.015)}
+  .tchip{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
+    border:1px solid var(--border);border-radius:8px;padding:5px 10px}
+  .tchip .ic{width:14px;height:14px;display:inline-grid;place-items:center;font-size:12px}
+  .tchip.pending{opacity:.55}
+  .tchip.running{border-color:var(--accent);color:var(--txt);background:rgba(91,140,255,.07)}
+  .tchip.done{border-color:rgba(110,231,214,.4);color:var(--accent2)}
+  .tchip.skipped{opacity:.45}
+  .tchip b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .tchip .prog{color:var(--dim);font-variant-numeric:tabular-nums}
+  .mini-spin{width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .7s linear infinite}
+
   .tbody{padding:8px 10px}
   .finding{display:grid;grid-template-columns:92px 1fr;gap:12px;padding:12px 10px;
     border-bottom:1px solid rgba(255,255,255,.04)}
@@ -141,8 +140,6 @@
   .fevi a{color:var(--accent2)}
   .empty{color:var(--dim);padding:16px 10px;font-size:14px}
   .err{color:var(--crit);padding:14px 18px;font-size:14px}
-
-  .scanning{display:flex;align-items:center;gap:12px;padding:16px 18px;color:var(--muted)}
   footer{color:var(--dim);font-size:12px;text-align:center;margin-top:30px}
   .hint{color:var(--dim);font-size:12px;margin-top:6px}
 </style>
@@ -178,24 +175,15 @@
       <label class="toggle on"><input type="checkbox" id="opt_ports" checked> Port checks (FTP/SQL/DB + anon-FTP)</label>
       <label class="toggle on"><input type="checkbox" id="opt_cve" checked> Banner → CVE (NVD)</label>
       <label class="toggle"><input type="checkbox" id="opt_passive"> Fully passive (Shodan only, no contact)</label>
-      <label class="toggle danger"><input type="checkbox" id="opt_dirbust"> Directory brute-force ⚠ ACTIVE / noisy</label>
+      <label class="toggle danger"><input type="checkbox" id="opt_dirbust"> Directory brute-force ⚠ ACTIVE (common → large)</label>
     </div>
 
     <details class="adv">
       <summary>Advanced options &amp; API keys</summary>
       <div class="row">
-        <div>
-          <label class="fld">WPScan API key</label>
-          <input type="password" id="k_wpscan" placeholder="for WP core/plugin CVEs (optional)">
-        </div>
-        <div>
-          <label class="fld">NVD API key</label>
-          <input type="password" id="k_nvd" placeholder="speeds up banner CVE lookup (optional)">
-        </div>
-        <div>
-          <label class="fld">Shodan API key</label>
-          <input type="password" id="k_shodan" placeholder="for fully-passive mode">
-        </div>
+        <div><label class="fld">WPScan API key</label><input type="password" id="k_wpscan" placeholder="for WP core/plugin CVEs (optional)"></div>
+        <div><label class="fld">NVD API key</label><input type="password" id="k_nvd" placeholder="speeds up banner CVE lookup (optional)"></div>
+        <div><label class="fld">Shodan API key</label><input type="password" id="k_shodan" placeholder="for fully-passive mode"></div>
       </div>
       <div class="row">
         <div><label class="fld">Ports (empty = default)</label><input type="text" id="p_ports" placeholder="21,3306,5432,1433,1521,27017,6379"></div>
@@ -205,10 +193,11 @@
         <div><label class="fld">HTTP timeout (s)</label><input type="number" id="p_timeout" value="8" min="1" max="60"></div>
       </div>
       <div class="row">
-        <div style="flex:2 1 320px"><label class="fld">Dir brute-force wordlist (server path, empty = bundled raft-medium)</label><input type="text" id="p_wordlist" placeholder="wordlists/raft-medium-directories.txt"></div>
-        <div><label class="fld">Dirbust limit (0 = all ~30k)</label><input type="number" id="p_dirlimit" value="0" min="0" max="200000"></div>
+        <div style="flex:2 1 320px"><label class="fld">Dir brute-force LARGE wordlist (server path, empty = bundled raft-medium)</label><input type="text" id="p_wordlist" placeholder="wordlists/raft-medium-directories.txt"></div>
+        <div style="flex:2 1 260px"><label class="fld">COMMON wordlist (empty = bundled common.txt)</label><input type="text" id="p_wordlist_common" placeholder="wordlists/common.txt"></div>
+        <div><label class="fld">Dirbust limit / phase (0 = all)</label><input type="number" id="p_dirlimit" value="0" min="0" max="200000"></div>
       </div>
-      <div class="hint">Keys are not stored; empty fields fall back to the server's ENV / config.json. Directory brute-force is <b>active</b> — one request per wordlist entry.</div>
+      <div class="hint">Keys are not stored; empty fields fall back to the server's ENV / config.json. Directory brute-force is <b>active</b> — one request per wordlist entry, common phase first, then large.</div>
     </details>
 
     <div class="actions">
@@ -229,112 +218,118 @@
 <script>
 const SEV = ["critical","high","medium","low","info"];
 const SEV_ORDER = {critical:0,high:1,medium:2,low:3,info:4};
+const SEV_VAR = {critical:'crit',high:'high',medium:'med',low:'low',info:'info'};
+const TASK_LABEL = {
+  ports:'Ports', shodan:'Shodan', http:'HTTP checks', cve:'Banner→CVE',
+  'dirbust-common':'Dir brute · common', 'dirbust-large':'Dir brute · large'
+};
 const $ = id => document.getElementById(id);
-let results = [];        // collected TargetResults
+let state = {};          // idx -> target state
+let order = [];          // idx order
 let hidden = new Set();  // hidden severities
 
-// Toggle styling
 document.querySelectorAll('.toggle input').forEach(cb=>{
   const upd=()=>cb.closest('.toggle').classList.toggle('on',cb.checked);
   cb.addEventListener('change',upd); upd();
 });
 
-function canRun(){
-  return $('authorized').checked && $('targets').value.trim().length>0;
-}
+function canRun(){ return $('authorized').checked && $('targets').value.trim().length>0; }
 function refreshRun(){ $('run').disabled = !canRun(); }
 $('authorized').addEventListener('change',refreshRun);
 $('targets').addEventListener('input',refreshRun);
 
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-
-function linkifyEvidence(ev){
+function linkify(ev){
   if(!ev) return '';
   const m = ev.match(/https?:\/\/[^\s\]]+/);
-  if(m){
-    const url=m[0];
-    return esc(ev).replace(esc(url),`<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`);
-  }
+  if(m){const u=m[0];return esc(ev).replace(esc(u),`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u)}</a>`);}
   return esc(ev);
 }
 
+function taskChip(name, t){
+  const label = TASK_LABEL[name] || name;
+  let ic, cls=t.status;
+  if(t.status==='running') ic='<span class="mini-spin"></span>';
+  else if(t.status==='done') ic='<span class="ic">✓</span>';
+  else if(t.status==='skipped') ic='<span class="ic">–</span>';
+  else { ic='<span class="ic">○</span>'; cls='pending'; }
+  let extra='';
+  if(t.status==='running' && t.total){ extra=` <span class="prog">${t.done||0}/${t.total}</span>`; }
+  if((t.found||0)>0){ extra+=` <b>${t.found}</b>`; }
+  return `<div class="tchip ${cls}">${ic} ${esc(label)}${extra}</div>`;
+}
+
+function headState(st){
+  if(st.error) return '<span class="ic" style="color:var(--crit)">✕</span>';
+  if(st.done) return '<span class="ic" style="color:var(--accent2)">✓</span>';
+  return '<span class="mini-spin"></span>';
+}
+
 function findingRow(f){
-  return `<div class="finding" data-sev="${f.severity}">
+  return `<div class="finding" data-sev="${f.severity}" style="${hidden.has(f.severity)?'display:none':''}">
     <div class="sev ${f.severity}">${f.severity}</div>
     <div>
       <div class="ftitle">${esc(f.title)}<span class="fcat">${esc(f.category)}</span></div>
       ${f.detail?`<div class="fdetail">${esc(f.detail)}</div>`:''}
-      ${f.evidence?`<div class="fevi">${linkifyEvidence(f.evidence)}</div>`:''}
+      ${f.evidence?`<div class="fevi">${linkify(f.evidence)}</div>`:''}
     </div>
   </div>`;
 }
 
-function targetCard(r){
-  const findings=(r.findings||[]).slice().sort((a,b)=>
-    (SEV_ORDER[a.severity]??9)-(SEV_ORDER[b.severity]??9));
-  const counts={};
-  findings.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1);
-  const summary=SEV.filter(s=>counts[s]).map(s=>
-    `<span style="color:var(--${s==='critical'?'crit':s==='high'?'high':s==='medium'?'med':s==='low'?'low':'info'})">${counts[s]} ${s}</span>`
-  ).join(' · ');
-  let body;
-  if(r.__error){
-    body=`<div class="err">Error: ${esc(r.__error)}</div>`;
-  }else if(!findings.length){
-    body=`<div class="empty">No findings.${(r.errors&&r.errors.length)?' ('+esc(r.errors.join('; '))+')':''}</div>`;
-  }else{
-    body=findings.map(findingRow).join('');
-    if(r.errors&&r.errors.length) body+=`<div class="fdetail" style="padding:8px 10px">${esc(r.errors.join('; '))}</div>`;
+function renderTarget(idx){
+  const st = state[idx];
+  let el = document.querySelector(`.target[data-idx="${idx}"]`);
+  if(!el){
+    el = document.createElement('div'); el.className='target'; el.dataset.idx=idx;
+    $('results').appendChild(el);
   }
-  const meta=[r.resolved_ip?('IP '+r.resolved_ip):'', r.base_url||''].filter(Boolean).join('<br>');
-  return `<div class="target" data-idx="${r.__idx}">
+  const findings = st.findings.slice().sort((a,b)=>
+    (SEV_ORDER[a.severity]??9)-(SEV_ORDER[b.severity]??9));
+  const counts={}; findings.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1);
+  const csum = SEV.filter(s=>counts[s]).map(s=>
+    `<span style="color:var(--${SEV_VAR[s]})">${counts[s]} ${s}</span>`).join(' · ');
+  const meta=[st.resolved_ip?('IP '+st.resolved_ip):'', st.base_url||''].filter(Boolean).join('<br>');
+  const tasksHtml = st.taskOrder.length
+    ? `<div class="tasks">${st.taskOrder.map(n=>taskChip(n, st.tasks[n]||{status:'pending'})).join('')}</div>` : '';
+  let body;
+  if(st.error){ body=`<div class="err">Error: ${esc(st.error)}</div>`; }
+  else if(!findings.length){
+    body=`<div class="empty">${st.done?'No findings.':'Scanning…'}${(st.errors&&st.errors.length)?' ('+esc(st.errors.join('; '))+')':''}</div>`;
+  } else {
+    body=findings.map(findingRow).join('');
+    if(st.done && st.errors && st.errors.length) body+=`<div class="fdetail" style="padding:8px 10px">${esc(st.errors.join('; '))}</div>`;
+  }
+  el.innerHTML = `
     <div class="thead">
-      <span class="tname">${esc(r.target)}</span>
-      <span class="tmeta">${meta||'&mdash;'}<br>${summary||''}</span>
+      <span class="tstate">${headState(st)}</span>
+      <span class="tname">${esc(st.target)}</span>
+      <span class="tmeta">${meta||'&mdash;'}${csum?('<br>'+csum):''}</span>
     </div>
-    <div class="tbody">${body}</div>
-  </div>`;
-}
-
-function scanningCard(idx,target){
-  return `<div class="target" data-idx="${idx}" data-scanning="1">
-    <div class="thead"><span class="tname">${esc(target)}</span>
-      <span class="tmeta">running…</span></div>
-    <div class="scanning"><div class="spinner"></div> Scanning ${esc(target)} …</div>
-  </div>`;
+    ${tasksHtml}
+    <div class="tbody">${body}</div>`;
 }
 
 function renderSummary(){
   const counts={};
-  results.forEach(r=>(r.findings||[]).forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1));
+  order.forEach(i=>state[i].findings.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1));
   const bar=$('sumbar');
-  if(!results.length){bar.style.display='none';return;}
+  if(!order.length){bar.style.display='none';return;}
   bar.style.display='flex';
-  bar.innerHTML=SEV.map(s=>{
-    const n=counts[s]||0;
-    return `<div class="chip ${hidden.has(s)?'off':''}" data-sev="${s}">
-      <span class="dot ${s}"></span> <span>${s}</span> <b>${n}</b></div>`;
-  }).join('');
+  bar.innerHTML=SEV.map(s=>`<div class="chip ${hidden.has(s)?'off':''}" data-sev="${s}">
+    <span class="dot ${s}"></span> <span>${s}</span> <b>${counts[s]||0}</b></div>`).join('');
   bar.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
-    const s=c.dataset.sev;
-    hidden.has(s)?hidden.delete(s):hidden.add(s);
-    applyFilter(); renderSummary();
-  });
-}
-function applyFilter(){
-  document.querySelectorAll('.finding').forEach(el=>{
-    el.style.display=hidden.has(el.dataset.sev)?'none':'';
+    const s=c.dataset.sev; hidden.has(s)?hidden.delete(s):hidden.add(s);
+    order.forEach(renderTarget); renderSummary();
   });
 }
 
 function collectOptions(){
-  const targets=$('targets').value;
   return {
-    targets, authorized:$('authorized').checked,
+    targets:$('targets').value, authorized:$('authorized').checked,
     no_http:!$('opt_http').checked, no_ports:!$('opt_ports').checked,
     no_cve:!$('opt_cve').checked, passive_only:$('opt_passive').checked,
     dirbust:$('opt_dirbust').checked, wordlist:$('p_wordlist').value,
-    dirbust_limit:+$('p_dirlimit').value||0,
+    wordlist_common:$('p_wordlist_common').value, dirbust_limit:+$('p_dirlimit').value||0,
     wpscan_api_key:$('k_wpscan').value, nvd_api_key:$('k_nvd').value,
     shodan_api_key:$('k_shodan').value,
     ports:$('p_ports').value, max_cves:+$('p_maxcve').value||10,
@@ -343,13 +338,21 @@ function collectOptions(){
   };
 }
 
+function exportData(){
+  return order.map(i=>{
+    const s=state[i];
+    return {target:s.target, resolved_ip:s.resolved_ip, base_url:s.base_url,
+            findings:s.findings, errors:s.errors||[], error:s.error||null};
+  });
+}
+
 async function runScan(){
   const opts=collectOptions();
-  results=[]; hidden.clear();
+  state={}; order=[]; hidden.clear();
   $('results').innerHTML=''; $('sumbar').style.display='none'; $('notes').textContent='';
   $('run').disabled=true; $('export').disabled=true; $('clear').disabled=true;
   let total=0, done=0;
-  const setStatus=(html)=>$('status').innerHTML=html;
+  const setStatus=(h)=>$('status').innerHTML=h;
   setStatus('<div class="spinner"></div> Starting scan …');
 
   try{
@@ -363,31 +366,35 @@ async function runScan(){
       while((i=buf.indexOf('\n'))>=0){
         const line=buf.slice(0,i); buf=buf.slice(i+1);
         if(!line.trim())continue;
-        const ev=JSON.parse(line);
-        if(ev.type==='note'){
-          $('notes').textContent += (($('notes').textContent?' · ':'') + ev.text);
-        }else if(ev.type==='meta'){ total=ev.total;
-          setStatus(`<div class="spinner"></div> Scanning 0/${total} …`);
-        }else if(ev.type==='start'){
-          $('results').insertAdjacentHTML('beforeend',scanningCard(ev.index,ev.target));
-        }else if(ev.type==='result'){
-          const r=ev.data; r.__idx=ev.index; results.push(r);
-          const card=document.querySelector(`.target[data-idx="${ev.index}"]`);
-          const tmp=document.createElement('div'); tmp.innerHTML=targetCard(r);
-          if(card) card.replaceWith(tmp.firstElementChild);
-          else $('results').insertAdjacentHTML('beforeend',targetCard(r));
-          done++; setStatus(`<div class="spinner"></div> Scanning ${done}/${total} …`);
-          renderSummary(); applyFilter();
-        }else if(ev.type==='error'){
-          const r={target:ev.target||'?',__error:ev.error,__idx:ev.index,findings:[]};
-          results.push(r);
-          const card=document.querySelector(`.target[data-idx="${ev.index}"]`);
-          const tmp=document.createElement('div'); tmp.innerHTML=targetCard(r);
-          if(card) card.replaceWith(tmp.firstElementChild);
-          else $('results').insertAdjacentHTML('beforeend',targetCard(r));
-          done++; renderSummary();
-        }else if(ev.type==='done'){
-          setStatus(`<span style="color:var(--accent2)">✓ Done — ${done} target(s) scanned.</span>`);
+        const ev=JSON.parse(line); const idx=ev.index;
+        switch(ev.type){
+          case 'note':
+            $('notes').textContent += (($('notes').textContent?'\n':'')+ev.text); break;
+          case 'meta':
+            total=ev.total; setStatus(`<div class="spinner"></div> Scanning 0/${total} targets …`); break;
+          case 'start':
+            state[idx]={target:ev.target, resolved_ip:null, base_url:null,
+              tasks:{}, taskOrder:(ev.tasks||[]).slice(), findings:[], errors:[], done:false, error:null};
+            (ev.tasks||[]).forEach(n=>state[idx].tasks[n]={status:'pending'});
+            order.push(idx); renderTarget(idx); break;
+          case 'target_meta':
+            if(state[idx]){ if(ev.resolved_ip!==undefined)state[idx].resolved_ip=ev.resolved_ip;
+              if(ev.base_url!==undefined)state[idx].base_url=ev.base_url; renderTarget(idx);} break;
+          case 'task':
+            if(state[idx]){ if(!state[idx].taskOrder.includes(ev.task))state[idx].taskOrder.push(ev.task);
+              state[idx].tasks[ev.task]={status:ev.status, done:ev.done, total:ev.total, found:ev.found};
+              renderTarget(idx);} break;
+          case 'finding':
+            if(state[idx]){ state[idx].findings.push(ev.data); renderTarget(idx); renderSummary(); } break;
+          case 'target_done':
+            if(state[idx]){ state[idx].done=true; state[idx].errors=ev.errors||[]; renderTarget(idx); }
+            done++; setStatus(`<div class="spinner"></div> Scanning ${done}/${total} targets …`); break;
+          case 'error':
+            if(!state[idx]) { state[idx]={target:ev.target||'?',tasks:{},taskOrder:[],findings:[],errors:[]}; order.push(idx); }
+            state[idx].error=ev.error; state[idx].done=true; renderTarget(idx);
+            done++; break;
+          case 'done':
+            setStatus(`<span style="color:var(--accent2)">✓ Done — ${done} target(s) scanned.</span>`); break;
         }
       }
     }
@@ -395,16 +402,16 @@ async function runScan(){
     setStatus(`<span style="color:var(--crit)">Error: ${esc(e.message)}</span>`);
   }finally{
     refreshRun();
-    $('export').disabled=results.length===0;
-    $('clear').disabled=results.length===0;
+    $('export').disabled=order.length===0;
+    $('clear').disabled=order.length===0;
   }
 }
 
 $('run').onclick=runScan;
-$('clear').onclick=()=>{results=[];$('results').innerHTML='';$('sumbar').style.display='none';
+$('clear').onclick=()=>{state={};order=[];$('results').innerHTML='';$('sumbar').style.display='none';
   $('status').innerHTML='';$('notes').textContent='';$('export').disabled=true;$('clear').disabled=true;};
 $('export').onclick=()=>{
-  const blob=new Blob([JSON.stringify(results,null,2)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify(exportData(),null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='passive-recon-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';
   a.click(); URL.revokeObjectURL(a.href);

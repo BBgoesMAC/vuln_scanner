@@ -16,7 +16,6 @@ import json
 import os
 import sys
 import webbrowser
-from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import passive_recon as pr
@@ -50,14 +49,22 @@ def build_cfg(opts: dict) -> dict:
         enabled=not opts.get("no_cve"))
 
     dirbust = bool(opts.get("dirbust"))
-    dirbust_words = []
+    dirbust_phases = []
     if dirbust:
-        wl = (opts.get("wordlist") or "").strip() or pr.DEFAULT_WORDLIST
         try:
             limit = int(opts.get("dirbust_limit") or 0)
         except (TypeError, ValueError):
             limit = 0
-        dirbust_words = pr.load_wordlist(wl, limit)
+        wl_common = (opts.get("wordlist_common") or "").strip() or pr.DEFAULT_WORDLIST_COMMON
+        wl_large = (opts.get("wordlist") or "").strip() or pr.DEFAULT_WORDLIST
+        common = pr.load_wordlist(wl_common, limit)
+        large = pr.load_wordlist(wl_large, limit)
+        cset = set(common)
+        large = [w for w in large if w not in cset]
+        if common:
+            dirbust_phases.append(("common", common))
+        if large:
+            dirbust_phases.append(("large", large))
 
     return {
         "timeout": timeout,
@@ -71,7 +78,7 @@ def build_cfg(opts: dict) -> dict:
         "no_ports": bool(opts.get("no_ports")),
         "no_http": bool(opts.get("no_http")),
         "dirbust": dirbust,
-        "dirbust_words": dirbust_words,
+        "dirbust_phases": dirbust_phases,
         "dirbust_workers": int(opts.get("dirbust_workers") or pr.DEFAULT_DIRBUST_WORKERS),
         "nvd_client": nvd,
     }
@@ -178,19 +185,29 @@ class Handler(BaseHTTPRequestHandler):
         for n in notes:
             self._emit({"type": "note", "text": n})
         if opts.get("dirbust"):
-            n_words = len(cfg.get("dirbust_words") or [])
-            if n_words:
-                self._emit({"type": "note", "text": f"ACTIVE directory "
-                            f"brute-force: {n_words} entries per target (noisy!)"})
+            phases = cfg.get("dirbust_phases") or []
+            if phases:
+                desc = " -> ".join(f"{n}:{len(w)}" for n, w in phases)
+                total = sum(len(w) for _, w in phases)
+                self._emit({"type": "note", "text": f"ACTIVE directory brute-force: "
+                            f"{desc} = {total} requests per target (noisy!)"})
             else:
                 self._emit({"type": "note", "text": "dirbust enabled but wordlist "
                             "is empty / not found"})
+
+        planned = pr.plan_tasks(cfg)
         self._emit({"type": "meta", "total": len(targets)})
         for i, t in enumerate(targets):
-            self._emit({"type": "start", "index": i, "target": t})
+            self._emit({"type": "start", "index": i, "target": t,
+                        "tasks": planned})
+
+            def emit(ev, i=i):
+                self._emit({**ev, "index": i})
+
             try:
-                res = pr.scan_target(t, cfg)
-                self._emit({"type": "result", "index": i, "data": asdict(res)})
+                res = pr.scan_target(t, cfg, emit=emit)
+                self._emit({"type": "target_done", "index": i,
+                            "errors": res.errors})
             except Exception as e:
                 self._emit({"type": "error", "index": i, "target": t,
                             "error": str(e)})

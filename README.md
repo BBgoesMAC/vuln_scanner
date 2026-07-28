@@ -97,24 +97,37 @@ python3 passive_recon.py -y example.com
 Disable banner CVE lookup: `--no-cve`. CVEs per product: `--max-cves N`.
 Hosts per range/CIDR: `--max-hosts N`.
 
-### Directory brute-force (active, opt-in)
+### Directory brute-force (active, opt-in, two-phase)
 
 By default the directory-listing check is **directed** (passive): it only probes
 known paths (a small built-in list + everything in robots.txt). To actively guess
-directories with a wordlist and report the ones that are listable, use `--dirbust`:
+directories with a wordlist and report the ones that are listable, use `--dirbust`.
+
+It runs in **two phases** so you get quick results first:
+
+1. **common** — a small fast list (bundled SecLists `common.txt`, ~4.7k) → fast hits
+2. **large** — the big list (bundled SecLists `raft-medium-directories.txt`, ~30k),
+   with entries already covered by the common phase skipped
 
 ```bash
-# Uses the bundled SecLists raft-medium-directories.txt (~30k entries)
+# Uses both bundled wordlists (common first, then large)
 python3 passive_recon.py --dirbust example.com
 
-# Cap the wordlist, tune concurrency, or use your own list
+# Cap each phase, tune concurrency, or swap wordlists
 python3 passive_recon.py --dirbust --dirbust-limit 5000 --dirbust-workers 24 example.com
-python3 passive_recon.py --dirbust --wordlist /path/to/SecLists/.../common.txt example.com
+python3 passive_recon.py --dirbust --wordlist-common /path/small.txt --wordlist /path/big.txt example.com
 ```
 
-⚠️ This is **not passive**: it sends one request per wordlist entry (~30k with the
-default list), which is slow and clearly visible in the target's logs. In the web
-UI it is the "Directory brute-force ⚠ ACTIVE / noisy" toggle (off by default).
+In the web UI this is the "Directory brute-force ⚠ ACTIVE" toggle (off by
+default). Each target shows a **task checklist** (HTTP checks · ports · CVE ·
+Dir brute common · Dir brute large) with live status — pending ○, running (spinner
++ `done/total` progress), done ✓ with a hit count — and **findings stream in live**
+as they are discovered, so you can see e.g. "everything done, only the large
+directory phase still running".
+
+⚠️ This is **not passive**: it sends one request per wordlist entry (~35k across
+both phases with the defaults), which is slow and clearly visible in the target's
+logs.
 
 ## Storing API keys
 

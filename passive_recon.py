@@ -42,6 +42,7 @@ DEFAULT_PORT_TIMEOUT = 3.0
 DEFAULT_MAX_HOSTS = 1024           # per-range expansion cap (CIDR / ranges)
 DEFAULT_DIRBUST_WORKERS = 16       # concurrency for active directory brute-force
 WORDLIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlists")
+DEFAULT_WORDLIST_COMMON = os.path.join(WORDLIST_DIR, "common.txt")
 DEFAULT_WORDLIST = os.path.join(WORDLIST_DIR, "raft-medium-directories.txt")
 WPSCAN_API = "https://wpscan.com/api/v3"
 SHODAN_API = "https://api.shodan.io"
@@ -526,12 +527,19 @@ def load_wordlist(path: str, limit: int = 0) -> list[str]:
 
 
 def check_dirbust(base_url: str, words: list[str], timeout: float, ua: str,
-                  workers: int = DEFAULT_DIRBUST_WORKERS) -> list[Finding]:
+                  workers: int = DEFAULT_DIRBUST_WORKERS,
+                  on_hit=None, on_progress=None,
+                  progress_every: int = 150) -> list[Finding]:
     """ACTIVE directory brute-force: request /<word> for each word and report
     those that return a directory listing. This is NOT passive — it generates
-    one request per word and is noisy in logs. Opt-in only."""
+    one request per word and is noisy in logs. Opt-in only.
+
+    on_hit(finding)          is called (in this thread) as each listing is found.
+    on_progress(done, total) is called every `progress_every` completions.
+    """
     findings: list[Finding] = []
     root = base_url.rstrip("/")
+    total = len(words)
 
     def _probe(word: str):
         # A single GET; redirects are followed, so "/dir" -> "/dir/" is covered.
@@ -541,14 +549,26 @@ def check_dirbust(base_url: str, words: list[str], timeout: float, ua: str,
             return (word, r.final_url or url)
         return None
 
+    done = 0
     with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        for res in ex.map(_probe, words):
+        futs = {ex.submit(_probe, w): w for w in words}
+        for fut in futures.as_completed(futs):
+            done += 1
+            try:
+                res = fut.result()
+            except Exception:
+                res = None
             if res:
                 word, url = res
-                findings.append(Finding(
+                f = Finding(
                     "directory-listing", f"Directory listing exposed: /{word}",
                     "medium", detail="found via wordlist brute-force",
-                    evidence=url))
+                    evidence=url)
+                findings.append(f)
+                if on_hit:
+                    on_hit(f)
+            if on_progress and (done % progress_every == 0 or done == total):
+                on_progress(done, total)
     return findings
 
 
@@ -961,102 +981,193 @@ def shodan_lookup(ip: str, api_key: str, timeout: float) -> list[Finding]:
 # Per-target scan orchestration
 # --------------------------------------------------------------------------- #
 
-def scan_target(target: str, cfg: dict) -> TargetResult:
+def plan_tasks(cfg: dict) -> list[str]:
+    """Return the ordered list of task names a scan will run (for the UI)."""
+    if cfg.get("passive_only"):
+        return ["shodan"]
+    tasks: list[str] = []
+    if not cfg.get("no_ports"):
+        tasks.append("ports")
+    if cfg.get("shodan_api_key"):
+        tasks.append("shodan")
+    if not cfg.get("no_http"):
+        tasks.append("http")
+    nvd = cfg.get("nvd_client")
+    if nvd and getattr(nvd, "enabled", False) and not (
+            cfg.get("no_http") and cfg.get("no_ports")):
+        tasks.append("cve")
+    if cfg.get("dirbust"):
+        for pname, words in cfg.get("dirbust_phases", []):
+            if words:
+                tasks.append(f"dirbust-{pname}")
+    return tasks
+
+
+def scan_target(target: str, cfg: dict, emit=None) -> TargetResult:
+    """Run all configured checks against one target.
+
+    If `emit` is given, it is called (in this thread) with streaming events:
+    {"type":"target_meta",...}, {"type":"task",...}, {"type":"finding",...}.
+    Findings are also accumulated into the returned TargetResult.
+    """
     res = TargetResult(target=target)
     timeout = cfg["timeout"]
     ua = cfg["ua"]
 
+    def _emit(ev: dict):
+        if emit:
+            try:
+                emit(ev)
+            except Exception:
+                pass
+
+    def add(f: Finding):
+        res.add(f)
+        _emit({"type": "finding", "data": asdict(f)})
+
+    def task(name: str, status: str, **extra):
+        _emit({"type": "task", "task": name, "status": status, **extra})
+
     res.resolved_ip = resolve_ip(target)
+    _emit({"type": "target_meta", "resolved_ip": res.resolved_ip})
 
     # ---- Fully passive mode: Shodan only ----
     if cfg.get("passive_only"):
+        task("shodan", "running")
+        n = 0
         if res.resolved_ip and cfg.get("shodan_api_key"):
             for f in shodan_lookup(res.resolved_ip, cfg["shodan_api_key"], timeout):
-                res.add(f)
+                add(f); n += 1
         else:
             res.errors.append("passive-only: requires a resolvable IP + Shodan key")
+        task("shodan", "done", found=n)
         return res
 
-    # ---- Port checks ----
     banners_for_cve: list[tuple] = []   # (banner, evidence, hint)
 
-    if res.resolved_ip and not cfg.get("no_ports"):
-        port_findings, port_banners = check_ports(
-            res.resolved_ip, cfg["ports"], cfg["port_timeout"])
-        for f in port_findings:
-            res.add(f)
-        banners_for_cve += port_banners
+    # ---- Port checks ----
+    if not cfg.get("no_ports"):
+        task("ports", "running")
+        n = 0
+        if res.resolved_ip:
+            port_findings, port_banners = check_ports(
+                res.resolved_ip, cfg["ports"], cfg["port_timeout"])
+            for f in port_findings:
+                add(f); n += 1
+            banners_for_cve += port_banners
+            task("ports", "done", found=n)
+        else:
+            task("ports", "skipped")
 
-    # ---- Optionally also Shodan ----
-    if cfg.get("shodan_api_key") and res.resolved_ip:
-        for f in shodan_lookup(res.resolved_ip, cfg["shodan_api_key"], timeout):
-            res.add(f)
+    # ---- Optionally Shodan ----
+    if cfg.get("shodan_api_key"):
+        task("shodan", "running")
+        n = 0
+        if res.resolved_ip:
+            for f in shodan_lookup(res.resolved_ip, cfg["shodan_api_key"], timeout):
+                add(f); n += 1
+            task("shodan", "done", found=n)
+        else:
+            task("shodan", "skipped")
+
+    # ---- Reach a base URL (needed for HTTP checks and/or dirbust) ----
+    need_http = not cfg.get("no_http")
+    need_dirbust = bool(cfg.get("dirbust") and cfg.get("dirbust_phases"))
+    base = None
+    if need_http or need_dirbust:
+        base = pick_base_url(target, timeout, ua)
+        if base is not None:
+            res.base_url = base.final_url
+            _emit({"type": "target_meta", "resolved_ip": res.resolved_ip,
+                   "base_url": res.base_url})
+
+    dir_seen: set[str] = set()
 
     # ---- HTTP-based checks ----
-    if not cfg.get("no_http"):
-        base = pick_base_url(target, timeout, ua)
+    if need_http:
+        task("http", "running")
         if base is None:
             res.errors.append("No HTTP(S) reachable")
-            return res
-        base_url = base.final_url
-        res.base_url = base_url
+            task("http", "skipped")
+        else:
+            base_url = base.final_url
+            n = 0
+            for f in check_headers(base, base_url):
+                add(f); n += 1
 
-        for f in check_headers(base, base_url):
-            res.add(f)
+            _h = {k.lower(): v for k, v in base.headers.items()}
+            for hk in ("server", "x-powered-by"):
+                if _h.get(hk):
+                    banners_for_cve.append((_h[hk], base_url, "http"))
 
-        # Collect HTTP banners (Server / X-Powered-By) for CVE lookup
-        _h = {k.lower(): v for k, v in base.headers.items()}
-        for hk in ("server", "x-powered-by"):
-            if _h.get(hk):
-                banners_for_cve.append((_h[hk], base_url, "http"))
+            robots_findings, disallowed = check_robots(base_url, timeout, ua)
+            for f in robots_findings:
+                add(f); n += 1
 
-        robots_findings, disallowed = check_robots(base_url, timeout, ua)
-        for f in robots_findings:
-            res.add(f)
+            for f in check_basic_auth(base_url, timeout, ua):
+                add(f); n += 1
 
-        for f in check_basic_auth(base_url, timeout, ua):
-            res.add(f)
+            for f in check_directory_listing(base_url, disallowed, timeout, ua):
+                if f.title not in dir_seen:
+                    dir_seen.add(f.title); add(f); n += 1
 
-        dir_seen: set[str] = set()
-        for f in check_directory_listing(base_url, disallowed, timeout, ua):
-            dir_seen.add(f.title)
-            res.add(f)
-
-        # ACTIVE (opt-in): directory brute-force with a wordlist
-        if cfg.get("dirbust") and cfg.get("dirbust_words"):
-            for f in check_dirbust(base_url, cfg["dirbust_words"], timeout, ua,
-                                   cfg.get("dirbust_workers", DEFAULT_DIRBUST_WORKERS)):
-                if f.title in dir_seen:
-                    continue
-                dir_seen.add(f.title)
-                res.add(f)
-
-        is_wp, version, plugins, themes = detect_wordpress(base, base_url, timeout, ua)
-        if is_wp:
-            v = f" (version {version})" if version else " (version unknown)"
-            res.add(Finding("wordpress", f"WordPress detected{v}", "info",
+            is_wp, version, plugins, themes = detect_wordpress(
+                base, base_url, timeout, ua)
+            if is_wp:
+                v = f" (version {version})" if version else " (version unknown)"
+                add(Finding("wordpress", f"WordPress detected{v}", "info",
                             detail=(f"Plugins: {', '.join(sorted(plugins))}"
                                     if plugins else ""),
-                            evidence=base_url))
-            for f in check_xmlrpc(base_url, timeout, ua):
-                res.add(f)
-            for f in check_user_enum(base_url, timeout, ua, cfg["user_enum_max"]):
-                res.add(f)
-            for f in wpscan_findings(is_wp, version, plugins,
-                                     cfg.get("wpscan_api_key", ""), timeout):
-                res.add(f)
+                            evidence=base_url)); n += 1
+                for f in check_xmlrpc(base_url, timeout, ua):
+                    add(f); n += 1
+                for f in check_user_enum(base_url, timeout, ua, cfg["user_enum_max"]):
+                    add(f); n += 1
+                for f in wpscan_findings(is_wp, version, plugins,
+                                         cfg.get("wpscan_api_key", ""), timeout):
+                    add(f); n += 1
+            task("http", "done", found=n)
 
     # ---- Banner -> CVE (NVD) ----
     nvd: Optional[NvdClient] = cfg.get("nvd_client")
-    if nvd and nvd.enabled and banners_for_cve:
-        seen_cve: set[str] = set()
-        for banner, evidence, hint in banners_for_cve:
-            for f in nvd.cve_findings(banner, evidence, hint):
-                key = f.evidence or f.title
-                if key in seen_cve:
-                    continue
-                seen_cve.add(key)
-                res.add(f)
+    if nvd and nvd.enabled and not (cfg.get("no_http") and cfg.get("no_ports")):
+        task("cve", "running")
+        n = 0
+        if banners_for_cve:
+            seen_cve: set[str] = set()
+            for banner, evidence, hint in banners_for_cve:
+                for f in nvd.cve_findings(banner, evidence, hint):
+                    key = f.evidence or f.title
+                    if key in seen_cve:
+                        continue
+                    seen_cve.add(key); add(f); n += 1
+        task("cve", "done", found=n)
+
+    # ---- ACTIVE (opt-in): phased directory brute-force (common, then large) ----
+    if need_dirbust and res.base_url:
+        base_url = res.base_url
+        workers = cfg.get("dirbust_workers", DEFAULT_DIRBUST_WORKERS)
+        for pname, words in cfg["dirbust_phases"]:
+            if not words:
+                continue
+            tname = f"dirbust-{pname}"
+            task(tname, "running", done=0, total=len(words))
+            counter = {"n": 0}
+
+            def _on_hit(f, counter=counter):
+                if f.title in dir_seen:
+                    return
+                dir_seen.add(f.title)
+                counter["n"] += 1
+                add(f)
+
+            def _on_prog(done, total, tname=tname, counter=counter):
+                task(tname, "running", done=done, total=total, found=counter["n"])
+
+            check_dirbust(base_url, words, timeout, ua, workers,
+                          on_hit=_on_hit, on_progress=_on_prog)
+            task(tname, "done", found=counter["n"])
+
     return res
 
 
@@ -1152,11 +1263,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-ports", action="store_true", help="Skip port checks")
     p.add_argument("--no-http", action="store_true", help="Skip HTTP checks")
     p.add_argument("--dirbust", action="store_true",
-                   help="ACTIVE directory brute-force with a wordlist (noisy, not passive)")
+                   help="ACTIVE directory brute-force in phases (noisy, not passive): "
+                        "a fast 'common' list first, then the large one")
+    p.add_argument("--wordlist-common", default=DEFAULT_WORDLIST_COMMON,
+                   help="Fast first-phase wordlist (default: bundled common.txt)")
     p.add_argument("--wordlist", default=DEFAULT_WORDLIST,
-                   help="Wordlist for --dirbust (default: bundled raft-medium-directories.txt)")
+                   help="Large second-phase wordlist (default: bundled raft-medium-directories.txt)")
     p.add_argument("--dirbust-limit", type=int, default=0,
-                   help="Cap the number of wordlist entries (0 = all)")
+                   help="Cap the number of entries per phase (0 = all)")
     p.add_argument("--dirbust-workers", type=int, default=DEFAULT_DIRBUST_WORKERS,
                    help="Concurrent requests for --dirbust")
     p.add_argument("--ports", help="Override port list, comma-separated, e.g. 21,3306,5432")
@@ -1212,16 +1326,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         ports = DB_PORTS
 
-    dirbust_words: list[str] = []
+    dirbust_phases: list[tuple] = []
     if args.dirbust:
-        dirbust_words = load_wordlist(args.wordlist, args.dirbust_limit)
-        if not dirbust_words:
-            print(C.wrap(f"  [!] --dirbust: wordlist not found or empty: "
-                         f"{args.wordlist}", C.YELLOW))
+        common = load_wordlist(args.wordlist_common, args.dirbust_limit)
+        large = load_wordlist(args.wordlist, args.dirbust_limit)
+        cset = set(common)
+        large = [w for w in large if w not in cset]   # skip words already in common
+        if common:
+            dirbust_phases.append(("common", common))
+        if large:
+            dirbust_phases.append(("large", large))
+        if not dirbust_phases:
+            print(C.wrap(f"  [!] --dirbust: no wordlist entries loaded "
+                         f"({args.wordlist_common} / {args.wordlist})", C.YELLOW))
         else:
-            print(C.wrap(f"  [i] ACTIVE directory brute-force enabled: "
-                         f"{len(dirbust_words)} entries per target (noisy!)",
-                         C.YELLOW))
+            total = sum(len(w) for _, w in dirbust_phases)
+            phases = " -> ".join(f"{n}:{len(w)}" for n, w in dirbust_phases)
+            print(C.wrap(f"  [i] ACTIVE directory brute-force: {phases} "
+                         f"= {total} requests per target (noisy!)", C.YELLOW))
 
     # Authorization notice
     if not args.yes:
@@ -1255,7 +1377,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "no_ports": args.no_ports,
         "no_http": args.no_http,
         "dirbust": args.dirbust,
-        "dirbust_words": dirbust_words,
+        "dirbust_phases": dirbust_phases,
         "dirbust_workers": args.dirbust_workers,
         "nvd_client": NvdClient(nvd_key, args.timeout, args.max_cves,
                                 enabled=not args.no_cve),
