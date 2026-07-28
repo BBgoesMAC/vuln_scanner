@@ -40,6 +40,9 @@ DEFAULT_TIMEOUT = 8.0
 DEFAULT_USER_ENUM_MAX = 3          # /?author=1..N  (keep small = non-invasive)
 DEFAULT_PORT_TIMEOUT = 3.0
 DEFAULT_MAX_HOSTS = 1024           # per-range expansion cap (CIDR / ranges)
+DEFAULT_DIRBUST_WORKERS = 16       # concurrency for active directory brute-force
+WORDLIST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlists")
+DEFAULT_WORDLIST = os.path.join(WORDLIST_DIR, "raft-medium-directories.txt")
 WPSCAN_API = "https://wpscan.com/api/v3"
 SHODAN_API = "https://api.shodan.io"
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -502,6 +505,50 @@ def check_directory_listing(base_url: str, extra_paths: list[str],
             findings.append(Finding(
                 "directory-listing", f"Directory listing exposed: {path}",
                 "medium", evidence=url))
+    return findings
+
+
+def load_wordlist(path: str, limit: int = 0) -> list[str]:
+    """Load a directory wordlist (one entry per line; '#' comments ignored)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            raw = [ln.strip().lstrip("/") for ln in fh]
+    except OSError:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in raw:
+        if not w or w.startswith("#") or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+    return out[:limit] if limit and limit > 0 else out
+
+
+def check_dirbust(base_url: str, words: list[str], timeout: float, ua: str,
+                  workers: int = DEFAULT_DIRBUST_WORKERS) -> list[Finding]:
+    """ACTIVE directory brute-force: request /<word> for each word and report
+    those that return a directory listing. This is NOT passive — it generates
+    one request per word and is noisy in logs. Opt-in only."""
+    findings: list[Finding] = []
+    root = base_url.rstrip("/")
+
+    def _probe(word: str):
+        # A single GET; redirects are followed, so "/dir" -> "/dir/" is covered.
+        url = f"{root}/{word}"
+        r = http_get(url, timeout, ua)
+        if r and r.status == 200 and _INDEX_OF_RE.search(r.body):
+            return (word, r.final_url or url)
+        return None
+
+    with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+        for res in ex.map(_probe, words):
+            if res:
+                word, url = res
+                findings.append(Finding(
+                    "directory-listing", f"Directory listing exposed: /{word}",
+                    "medium", detail="found via wordlist brute-force",
+                    evidence=url))
     return findings
 
 
@@ -970,8 +1017,19 @@ def scan_target(target: str, cfg: dict) -> TargetResult:
         for f in check_basic_auth(base_url, timeout, ua):
             res.add(f)
 
+        dir_seen: set[str] = set()
         for f in check_directory_listing(base_url, disallowed, timeout, ua):
+            dir_seen.add(f.title)
             res.add(f)
+
+        # ACTIVE (opt-in): directory brute-force with a wordlist
+        if cfg.get("dirbust") and cfg.get("dirbust_words"):
+            for f in check_dirbust(base_url, cfg["dirbust_words"], timeout, ua,
+                                   cfg.get("dirbust_workers", DEFAULT_DIRBUST_WORKERS)):
+                if f.title in dir_seen:
+                    continue
+                dir_seen.add(f.title)
+                res.add(f)
 
         is_wp, version, plugins, themes = detect_wordpress(base, base_url, timeout, ua)
         if is_wp:
@@ -1093,6 +1151,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Fully passive: no contact with the target, Shodan only")
     p.add_argument("--no-ports", action="store_true", help="Skip port checks")
     p.add_argument("--no-http", action="store_true", help="Skip HTTP checks")
+    p.add_argument("--dirbust", action="store_true",
+                   help="ACTIVE directory brute-force with a wordlist (noisy, not passive)")
+    p.add_argument("--wordlist", default=DEFAULT_WORDLIST,
+                   help="Wordlist for --dirbust (default: bundled raft-medium-directories.txt)")
+    p.add_argument("--dirbust-limit", type=int, default=0,
+                   help="Cap the number of wordlist entries (0 = all)")
+    p.add_argument("--dirbust-workers", type=int, default=DEFAULT_DIRBUST_WORKERS,
+                   help="Concurrent requests for --dirbust")
     p.add_argument("--ports", help="Override port list, comma-separated, e.g. 21,3306,5432")
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="HTTP timeout (s)")
     p.add_argument("--port-timeout", type=float, default=DEFAULT_PORT_TIMEOUT, help="Port timeout (s)")
@@ -1146,6 +1212,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         ports = DB_PORTS
 
+    dirbust_words: list[str] = []
+    if args.dirbust:
+        dirbust_words = load_wordlist(args.wordlist, args.dirbust_limit)
+        if not dirbust_words:
+            print(C.wrap(f"  [!] --dirbust: wordlist not found or empty: "
+                         f"{args.wordlist}", C.YELLOW))
+        else:
+            print(C.wrap(f"  [i] ACTIVE directory brute-force enabled: "
+                         f"{len(dirbust_words)} entries per target (noisy!)",
+                         C.YELLOW))
+
     # Authorization notice
     if not args.yes:
         print(C.wrap(
@@ -1177,6 +1254,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "passive_only": args.passive_only,
         "no_ports": args.no_ports,
         "no_http": args.no_http,
+        "dirbust": args.dirbust,
+        "dirbust_words": dirbust_words,
+        "dirbust_workers": args.dirbust_workers,
         "nvd_client": NvdClient(nvd_key, args.timeout, args.max_cves,
                                 enabled=not args.no_cve),
     }

@@ -75,6 +75,7 @@
   .toggle:hover{border-color:var(--border2)}
   .toggle input{accent-color:var(--accent);width:15px;height:15px}
   .toggle.on{border-color:var(--accent);background:rgba(91,140,255,.08)}
+  .toggle.danger.on{border-color:var(--high);background:rgba(255,145,66,.1)}
 
   details.adv{margin-top:16px;border-top:1px solid var(--border);padding-top:8px}
   details.adv summary{cursor:pointer;color:var(--accent2);font-size:13px;
@@ -177,6 +178,7 @@
       <label class="toggle on"><input type="checkbox" id="opt_ports" checked> Port checks (FTP/SQL/DB + anon-FTP)</label>
       <label class="toggle on"><input type="checkbox" id="opt_cve" checked> Banner → CVE (NVD)</label>
       <label class="toggle"><input type="checkbox" id="opt_passive"> Fully passive (Shodan only, no contact)</label>
+      <label class="toggle danger"><input type="checkbox" id="opt_dirbust"> Directory brute-force ⚠ ACTIVE / noisy</label>
     </div>
 
     <details class="adv">
@@ -202,7 +204,11 @@
         <div><label class="fld">WP user-enum max IDs</label><input type="number" id="p_userenum" value="3" min="1" max="50"></div>
         <div><label class="fld">HTTP timeout (s)</label><input type="number" id="p_timeout" value="8" min="1" max="60"></div>
       </div>
-      <div class="hint">Keys are not stored; empty fields fall back to the server's ENV / config.json.</div>
+      <div class="row">
+        <div style="flex:2 1 320px"><label class="fld">Dir brute-force wordlist (server path, empty = bundled raft-medium)</label><input type="text" id="p_wordlist" placeholder="wordlists/raft-medium-directories.txt"></div>
+        <div><label class="fld">Dirbust limit (0 = all ~30k)</label><input type="number" id="p_dirlimit" value="0" min="0" max="200000"></div>
+      </div>
+      <div class="hint">Keys are not stored; empty fields fall back to the server's ENV / config.json. Directory brute-force is <b>active</b> — one request per wordlist entry.</div>
     </details>
 
     <div class="actions">
@@ -327,6 +333,8 @@ function collectOptions(){
     targets, authorized:$('authorized').checked,
     no_http:!$('opt_http').checked, no_ports:!$('opt_ports').checked,
     no_cve:!$('opt_cve').checked, passive_only:$('opt_passive').checked,
+    dirbust:$('opt_dirbust').checked, wordlist:$('p_wordlist').value,
+    dirbust_limit:+$('p_dirlimit').value||0,
     wpscan_api_key:$('k_wpscan').value, nvd_api_key:$('k_nvd').value,
     shodan_api_key:$('k_shodan').value,
     ports:$('p_ports').value, max_cves:+$('p_maxcve').value||10,

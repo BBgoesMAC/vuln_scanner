@@ -49,6 +49,16 @@ def build_cfg(opts: dict) -> dict:
         int(opts.get("max_cves") or pr.DEFAULT_MAX_CVES),
         enabled=not opts.get("no_cve"))
 
+    dirbust = bool(opts.get("dirbust"))
+    dirbust_words = []
+    if dirbust:
+        wl = (opts.get("wordlist") or "").strip() or pr.DEFAULT_WORDLIST
+        try:
+            limit = int(opts.get("dirbust_limit") or 0)
+        except (TypeError, ValueError):
+            limit = 0
+        dirbust_words = pr.load_wordlist(wl, limit)
+
     return {
         "timeout": timeout,
         "port_timeout": float(opts.get("port_timeout") or pr.DEFAULT_PORT_TIMEOUT),
@@ -60,6 +70,9 @@ def build_cfg(opts: dict) -> dict:
         "passive_only": bool(opts.get("passive_only")),
         "no_ports": bool(opts.get("no_ports")),
         "no_http": bool(opts.get("no_http")),
+        "dirbust": dirbust,
+        "dirbust_words": dirbust_words,
+        "dirbust_workers": int(opts.get("dirbust_workers") or pr.DEFAULT_DIRBUST_WORKERS),
         "nvd_client": nvd,
     }
 
@@ -164,6 +177,14 @@ class Handler(BaseHTTPRequestHandler):
 
         for n in notes:
             self._emit({"type": "note", "text": n})
+        if opts.get("dirbust"):
+            n_words = len(cfg.get("dirbust_words") or [])
+            if n_words:
+                self._emit({"type": "note", "text": f"ACTIVE directory "
+                            f"brute-force: {n_words} entries per target (noisy!)"})
+            else:
+                self._emit({"type": "note", "text": "dirbust enabled but wordlist "
+                            "is empty / not found"})
         self._emit({"type": "meta", "total": len(targets)})
         for i, t in enumerate(targets):
             self._emit({"type": "start", "index": i, "target": t})

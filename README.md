@@ -18,7 +18,8 @@ Python standard library only — no dependencies to install (Python ≥ 3.9).
 | WP user enumeration | `wordpress` | `/wp-json/wp/v2/users` + `/?author=N` (small N) |
 | XML-RPC enabled | `wordpress` | GET `/xmlrpc.php` |
 | CVE lookup for core & plugins | `wordpress` | WPScan API (key required) |
-| Directory listing | `directory-listing` | "Index of /" detection on a small path list + robots paths |
+| Directory listing (directed) | `directory-listing` | probes a small candidate list + all robots.txt paths, then checks each response for listing signatures (Apache/nginx/IIS/http.server/serve-index) |
+| Directory listing (brute-force) | `directory-listing` | **opt-in, ACTIVE** `--dirbust`: one request per wordlist entry (bundled SecLists `raft-medium-directories`, ~30k), flags any that return a listing |
 | Interesting robots.txt entries | `robots` | filters out standard entries, highlights "juicy" paths |
 | HTTP basic/digest auth prompts | `basic-auth` | 401 + `WWW-Authenticate` |
 | Open FTP/SQL/DB ports | `ports` | TCP connect + banner grab (no login) |
@@ -95,6 +96,25 @@ python3 passive_recon.py -y example.com
 
 Disable banner CVE lookup: `--no-cve`. CVEs per product: `--max-cves N`.
 Hosts per range/CIDR: `--max-hosts N`.
+
+### Directory brute-force (active, opt-in)
+
+By default the directory-listing check is **directed** (passive): it only probes
+known paths (a small built-in list + everything in robots.txt). To actively guess
+directories with a wordlist and report the ones that are listable, use `--dirbust`:
+
+```bash
+# Uses the bundled SecLists raft-medium-directories.txt (~30k entries)
+python3 passive_recon.py --dirbust example.com
+
+# Cap the wordlist, tune concurrency, or use your own list
+python3 passive_recon.py --dirbust --dirbust-limit 5000 --dirbust-workers 24 example.com
+python3 passive_recon.py --dirbust --wordlist /path/to/SecLists/.../common.txt example.com
+```
+
+⚠️ This is **not passive**: it sends one request per wordlist entry (~30k with the
+default list), which is slow and clearly visible in the target's logs. In the web
+UI it is the "Directory brute-force ⚠ ACTIVE / noisy" toggle (off by default).
 
 ## Storing API keys
 
